@@ -20,3 +20,8 @@ __pycache__/
 !terraform/envs/dev/builder.auto.tfvars
 
 !terraform/envs/dev/shared-database.auto.tfvars
+
+# Ansible: real inventories and deploy keys stay local
+ansible/**/inventory.ini
+ansible/**/sky_deploy_key*
+ansible/**/.venv/
