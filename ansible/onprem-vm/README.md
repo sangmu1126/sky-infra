@@ -71,3 +71,11 @@ HTTP 200을 확인해야 성공으로 기록한다. 이 포트들을 Sky 서버�
 - Docker가 게시한 포트는 `ufw` 규칙을 우회한다. 접근 제한은 VM 바깥 방화벽(클라우드 보안 그룹, 사내 방화벽)이나
   Docker의 `DOCKER-USER` 체인으로 한다.
 - HTTPS와 인터넷 공개 주소는 이 플레이북 범위가 아니다(Sky `onprem-vm`도 HTTP만 지원).
+
+## 자동 검사
+
+`onprem-checks`는 Python 3.12와 Ansible core 2.19.14에서 문법과 작업 목록을 검사합니다. VM에 접속하거나 Docker·SSH 설정을 변경하는 작업은 실행하지 않습니다. 실제 VM 적용·배포 검증은 별도로 수행합니다.
+
+## 확인한 환경
+
+기존 로컬 Lima VM(Ubuntu 24.04 arm64)에서 실제 적용·재적용과 Sky의 원격 HTTP 앱 배포·종료를 확인했습니다. Debian·x86_64 대상 및 인터넷 공개 HTTPS는 별도 검증이 필요합니다.

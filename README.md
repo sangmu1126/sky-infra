@@ -1,11 +1,12 @@
 # sky-infra
 
-Sky 서비스 서버가 올라갈 AWS 인프라의 Terraform 저장소입니다. 지금 구조는 **B안**입니다.
+Sky 서비스 서버가 올라갈 AWS 인프라의 Terraform과 기존 Linux VM의 Ansible 준비 구성을 관리합니다.
+[팀 원본](https://github.com/SoftBank-Hydrogen/sky-infra)을 바탕으로 개인적으로 유지·보완하는 저장소입니다. AWS 호스팅 구조는 **B안**입니다.
 - 컴퓨트: ECS Fargate의 API 서비스와 워커 서비스
 - 상태·파일·작업 전달: RDS PostgreSQL(Multi-AZ), S3, SQS
 - 사용자 앱 빌드: GitHub Actions
 
-사용자 앱(배포 서버)의 자원은 [`sky-platform`](https://github.com/SoftBank-Hydrogen/sky-platform)이 실행 중에 만들고 지웁니다. 두 저장소는 같은 자원을 동시에 관리하지 않습니다.
+사용자 앱(배포 서버)의 자원은 [`sky-platform`](https://github.com/sangmu1126/sky-platform)이 실행 중에 만들고 지웁니다. 두 저장소는 같은 자원을 동시에 관리하지 않습니다.
 
 설계와 결정 근거는 [`docs/design-b.md`](docs/design-b.md)에 있습니다. sky-platform이 맞춰야 할 계약(환경변수, 워커 동작, CloudFormation 권한 경계)은 그 문서 7장에 있습니다.
 
@@ -17,8 +18,16 @@ Sky 서비스 서버가 올라갈 AWS 인프라의 Terraform 저장소입니다.
 | `terraform/envs/dev/` | 개발 환경 루트. 모든 모듈을 연결한다 |
 | `terraform/modules/` | 모듈 (아래 표) |
 | `scripts/` | 이미지 배포 plan 범위 검사 스크립트와 테스트 |
+| [`ansible/onprem-vm/`](ansible/onprem-vm/) | 기존 Debian/Ubuntu VM의 Docker·Compose·배포 계정·SSH 준비 |
+| `.github/workflows/onprem.yaml` | Ansible 문법 검사. VM에 접속하거나 변경하지 않음 |
 | `.github/workflows/terraform.yaml` | 정적 검사·mock plan, PR plan, 승인 후 apply |
 | `.github/workflows/deploy.yaml` | 서비스 서버 이미지 배포 (SHA 파일만 바뀐 변경) |
+
+## 온프레미스 VM 준비
+
+이미 있는 Debian/Ubuntu VM은 [Ansible 실행 안내](ansible/onprem-vm/README.md)를 따라 준비합니다. AWS Terraform 적용과 독립적이며 AWS 계정 없이 사용할 수 있습니다.
+
+VM 생성, 사용자 앱 배포, HTTPS 구성은 이 플레이북의 범위가 아닙니다. 앱 배포는 준비 후 개인 `sky-platform`의 `onprem-vm` 어댑터로 실행합니다. 실제 인벤토리·개인 키는 Git에서 제외합니다.
 
 ## 모듈
 
@@ -52,7 +61,9 @@ Terraform 1.10 이상이 필요하며, CI는 1.15.8을 씁니다.
 
 ## 처음 적용 (담당자 한 명, 수동)
 
-아직 적용한 적이 없습니다. 아래 순서를 지킵니다.
+새 계정에 적용할 때 사용하는 절차입니다. 기존 팀 환경의 적용 이력과 개인 계정의 신규 구성을 구분해야 합니다.
+
+현재 Terraform에는 기존 환경을 가져오는 `imports.tf`와 계정·저장소 ID 설정이 있습니다. **새 개인 계정에서는 기존 리소스 존재 여부와 import ID, GitHub OIDC 대상, DNS·이미지·시크릿을 먼저 맞춰야 합니다.** 아래 명령만으로 과거 데이터까지 복원되지는 않습니다. 기존 state가 있다면 먼저 보존·확인합니다.
 - 비밀 값이 없거나 이미지가 없으면 태스크가 뜨지 않으므로 ECR과 비밀을 먼저 만듭니다.
 - A안(`sky-infra-v0`)을 같은 state 키로 적용한 적이 있다면 [`docs/design-b.md`](docs/design-b.md) 9장을 먼저 봅니다.
 
