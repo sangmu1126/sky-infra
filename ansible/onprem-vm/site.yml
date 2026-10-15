@@ -1,0 +1,169 @@
+# Prepare an existing Debian/Ubuntu VM as Sky's `onprem-vm` deployment target.
+#
+# Sky connects with Docker's SSH transport (ssh://<sky_user>@<host>) and runs
+# Compose services there. This playbook installs Docker Engine and the Compose
+# plugin from Docker's apt repository, creates the deploy-only account, installs
+# its public key and turns off SSH password and root logins.
+#
+# Membership in the `docker` group is effectively root on the VM. Use a VM that
+# is dedicated to Sky deployments.
+- name: Prepare Sky on-prem VM
+  hosts: sky_vms
+  become: true
+  vars:
+    sky_user: sky
+    # Docker's release signing key (https://docs.docker.com/engine/install/ubuntu/).
+    docker_gpg_fingerprint: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+    docker_packages:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+
+  pre_tasks:
+    - name: Require a supported OS and an explicit deploy key
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution in ["Ubuntu", "Debian"]
+          - ansible_facts.architecture in ["x86_64", "aarch64"]
+          - sky_ssh_public_key is defined
+          - sky_ssh_public_key is match('^ssh-ed25519 [A-Za-z0-9+/]+=* ?[^\n]*$')
+          - sky_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+        fail_msg: >-
+          Ubuntu or Debian only, and pass the Sky deploy key as
+          -e sky_ssh_public_key="ssh-ed25519 AAAA..." (ed25519 only).
+
+  tasks:
+    - name: Install apt prerequisites
+      ansible.builtin.apt:
+        # acl lets Ansible run the final check as the unprivileged deploy account.
+        name: [ca-certificates, curl, gnupg, acl, python3-debian]
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create the apt keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download Docker's signing key
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Read the downloaded key fingerprint
+      ansible.builtin.command: gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc
+      register: docker_key
+      changed_when: false
+
+    - name: Refuse a key that is not Docker's release key
+      ansible.builtin.assert:
+        that: docker_gpg_fingerprint in docker_key.stdout
+        fail_msg: Docker signing key fingerprint does not match; not adding the repository.
+
+    - name: Add Docker's apt repository
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: deb
+        uris: "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}"
+        suites: "{{ ansible_facts.distribution_release }}"
+        components: stable
+        architectures: "{{ 'arm64' if ansible_facts.architecture == 'aarch64' else 'amd64' }}"
+        signed_by: /etc/apt/keyrings/docker.asc
+
+    - name: Install Docker Engine and the Compose plugin
+      ansible.builtin.apt:
+        name: "{{ docker_packages }}"
+        update_cache: true
+
+    - name: Rotate container logs so deployments cannot fill the disk
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        mode: "0644"
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {"max-size": "10m", "max-file": "3"},
+            "live-restore": true
+          }
+      notify: Restart docker
+
+    - name: Start Docker on boot
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create the Sky deploy account
+      ansible.builtin.user:
+        name: "{{ sky_user }}"
+        shell: /bin/bash
+        groups: docker
+        append: true
+        password: "!"
+
+    - name: Create the deploy account's .ssh directory
+      ansible.builtin.file:
+        path: "/home/{{ sky_user }}/.ssh"
+        state: directory
+        owner: "{{ sky_user }}"
+        group: "{{ sky_user }}"
+        mode: "0700"
+
+    - name: Install only the Sky deploy key
+      ansible.builtin.copy:
+        dest: "/home/{{ sky_user }}/.ssh/authorized_keys"
+        content: "{{ sky_ssh_public_key }}\n"
+        owner: "{{ sky_user }}"
+        group: "{{ sky_user }}"
+        mode: "0600"
+
+    - name: Turn off SSH password and root logins
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/60-sky.conf
+        mode: "0644"
+        content: |
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin no
+        validate: /usr/sbin/sshd -t -f %s
+      notify: Reload ssh
+
+    - name: Apply handler changes before verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Check that the deploy account can use Docker and Compose
+      ansible.builtin.command: "{{ item }}"
+      become_user: "{{ sky_user }}"
+      loop:
+        - docker info --format '{{ "{{" }}.ServerVersion{{ "}}" }}'
+        - docker compose version --short
+      register: docker_check
+      changed_when: false
+
+    - name: Read SSH host key fingerprints
+      ansible.builtin.shell: for key in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$key"; done
+      register: host_keys
+      changed_when: false
+
+    - name: Show what to register on the Sky server
+      ansible.builtin.debug:
+        msg:
+          - "Docker {{ docker_check.results[0].stdout }}, Compose {{ docker_check.results[1].stdout }}"
+          - "SKY_VM_SSH_USER={{ sky_user }}"
+          - "Compare these host keys out of band before adding the VM to known_hosts:"
+          - "{{ host_keys.stdout_lines }}"
+
+  handlers:
+    - name: Restart docker
+      ansible.builtin.service:
+        name: docker
+        state: restarted
+
+    - name: Reload ssh
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded
