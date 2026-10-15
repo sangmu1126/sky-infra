@@ -1,0 +1,33 @@
+name: onprem-checks
+
+on:
+  pull_request:
+    paths:
+      - ansible/**
+      - .github/workflows/onprem.yaml
+  push:
+    branches: [main, feat/onprem-vm-bootstrap]
+    paths:
+      - ansible/**
+      - .github/workflows/onprem.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ansible/onprem-vm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the validation tool
+        run: python -m pip install 'ansible-core==2.19.14'
+      - name: Check playbook syntax without connecting to a VM
+        run: ansible-playbook -i inventory.example.ini site.yml --syntax-check
+      - name: Resolve the task list without applying changes
+        run: ansible-playbook -i inventory.example.ini site.yml --list-tasks
