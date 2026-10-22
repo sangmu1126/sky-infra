@@ -16,8 +16,8 @@ class StateApiRoleTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import psycopg
-        from psycopg import sql
         from interfaces.b_runtime import run_migrations
+        from psycopg import sql
 
         cls.psycopg = psycopg
         cls.dsn = psycopg.conninfo.conninfo_to_dict(os.environ["SKY_ROLE_TEST_DSN"])
@@ -127,29 +127,30 @@ class StateApiRoleTest(unittest.TestCase):
             "DELETE FROM sky_state.metadata_records WHERE false",
         ]
         for statement in statements:
-            with self.subTest(statement=statement), self.api() as connection:
-                with self.assertRaises(self.psycopg.errors.InsufficientPrivilege):
-                    with connection.transaction(force_rollback=True):
-                        connection.execute(statement)
+            with (
+                self.subTest(statement=statement),
+                self.api() as connection,
+                self.assertRaises(self.psycopg.errors.InsufficientPrivilege),
+                connection.transaction(force_rollback=True),
+            ):
+                connection.execute(statement)
 
     def test_rejects_unsafe_password_before_changes(self):
         with self.admin() as connection, self.assertRaises(ValueError):
             provision(connection, "short")
 
     def test_rejects_unregistered_existing_role(self):
-        with self.admin() as connection:
-            with connection.transaction(force_rollback=True):
-                connection.execute("COMMENT ON ROLE sky_api IS 'not-registered'")
-                with self.assertRaises(ValueError):
-                    provision(connection, self.password)
+        with self.admin() as connection, connection.transaction(force_rollback=True):
+            connection.execute("COMMENT ON ROLE sky_api IS 'not-registered'")
+            with self.assertRaises(ValueError):
+                provision(connection, self.password)
 
     def test_rejects_api_role_membership(self):
-        with self.admin() as connection:
-            with connection.transaction(force_rollback=True):
-                connection.execute("CREATE ROLE role_probe")
-                connection.execute("GRANT role_probe TO sky_api")
-                with self.assertRaises(ValueError):
-                    provision(connection, self.password)
+        with self.admin() as connection, connection.transaction(force_rollback=True):
+            connection.execute("CREATE ROLE role_probe")
+            connection.execute("GRANT role_probe TO sky_api")
+            with self.assertRaises(ValueError):
+                provision(connection, self.password)
 
 
 if __name__ == "__main__":
