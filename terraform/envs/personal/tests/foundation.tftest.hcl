@@ -29,6 +29,10 @@ run "private_foundation" {
     condition     = output.runtime_environment.SKY_STATE_WORKSPACE == "personal" && output.runtime_environment.SKY_AWS_ACCOUNT_ID == var.aws_account_id
     error_message = "Runtime references must remain scoped to the personal workspace/account."
   }
+  assert {
+    condition     = output.outbox_environment.SKY_DATABASE_SECRET_ARN == aws_secretsmanager_secret.state_outbox.arn && output.runtime_environment.SKY_DATABASE_SECRET_ARN == aws_secretsmanager_secret.state_api.arn && aws_secretsmanager_secret.state_outbox.name == "${var.name_prefix}/state-outbox"
+    error_message = "API and outbox runtime references must use their dedicated Secret resources."
+  }
 }
 
 run "state_database_protection" {

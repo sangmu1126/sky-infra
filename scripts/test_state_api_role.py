@@ -1,4 +1,4 @@
-"""Real PostgreSQL authorization tests; credentials are disposable loopback-only fixtures."""
+"""Real API/publisher authorization tests with disposable loopback-only credentials."""
 
 import hashlib
 import json
@@ -41,6 +41,9 @@ class StateApiRoleTest(unittest.TestCase):
         )
         with cls.admin() as connection:
             provision(connection, cls.password)
+            from state_outbox_role import provision as provision_outbox
+
+            provision_outbox(connection, cls.password)
 
     @classmethod
     def admin(cls):
@@ -151,6 +154,124 @@ class StateApiRoleTest(unittest.TestCase):
             connection.execute("GRANT role_probe TO sky_api")
             with self.assertRaises(ValueError):
                 provision(connection, self.password)
+
+    @classmethod
+    def outbox(cls):
+        return cls.psycopg.connect(
+            **{**cls.dsn, "user": "sky_outbox", "password": cls.password}
+        )
+
+    def test_outbox_readiness_and_unprivileged_identity(self):
+        from adapters.state.readiness import check_database_ready
+
+        check_database_ready(self.outbox, operations=True)
+        with self.outbox() as connection:
+            flags = connection.execute(
+                "SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname=current_user"
+            ).fetchone()[0]
+            self.assertFalse(flags)
+
+    def test_outbox_dispatches_real_durable_event_without_execution_rights(self):
+        from adapters.state.operations import PostgresOperationStore
+        from application.outbox import OutboxPublisher
+        from application.shared_database_consumer import AllocationQueueRouter
+
+        workspace = uuid4().hex
+        admitted = PostgresOperationStore(self.api, workspace=workspace).admit(
+            "probe", "deploy", "publisher-proof", {"source": "fixture"}
+        )
+        store = PostgresOperationStore(self.outbox, workspace=workspace)
+        deliveries = []
+
+        class Queue:
+            def publish(self, delivery):
+                deliveries.append(delivery)
+
+        publisher = OutboxPublisher(
+            store, AllocationQueueRouter(store, Queue(), None), "publisher"
+        )
+        report = publisher.dispatch_once()
+        self.assertEqual((report.confirmed, report.deferred), (1, 0))
+        self.assertEqual(deliveries[0].operation_id, admitted.id)
+        self.assertEqual(store.get(admitted.id).status, "queued")
+        self.assertEqual(publisher.dispatch_once().confirmed, 0)
+
+    def test_outbox_cannot_admit_execute_delete_or_rewrite_message_identity(self):
+        statements = [
+            "CREATE TABLE sky_state.role_probe(i integer)",
+            "CREATE ROLE role_probe",
+            "UPDATE sky_state.operations SET status=status WHERE false",
+            "UPDATE sky_state.metadata_records SET revision=revision WHERE false",
+            "UPDATE sky_state.outbox_events SET operation_id=operation_id WHERE false",
+            "UPDATE sky_state.outbox_events SET attempt_id=attempt_id WHERE false",
+            "INSERT INTO sky_state.outbox_events(workspace) SELECT 'probe' WHERE false",
+            "DELETE FROM sky_state.outbox_events WHERE false",
+            "DELETE FROM sky_state.mutation_scopes WHERE false",
+            "UPDATE sky_state.operation_schema_versions SET version=version WHERE false",
+        ]
+        for statement in statements:
+            with (
+                self.subTest(statement=statement),
+                self.outbox() as connection,
+                self.assertRaises(self.psycopg.errors.InsufficientPrivilege),
+                connection.transaction(force_rollback=True),
+            ):
+                connection.execute(statement)
+
+    def test_outbox_reprovision_removes_independent_column_grants(self):
+        from state_outbox_role import provision as provision_outbox
+
+        with self.admin() as connection, connection.transaction(force_rollback=True):
+            connection.execute(
+                "GRANT UPDATE(command) ON sky_state.operations TO sky_outbox"
+            )
+            connection.execute(
+                "GRANT UPDATE(attempt_id) ON sky_state.outbox_events TO sky_outbox"
+            )
+            provision_outbox(connection, self.password)
+            for table, column in (
+                ("operations", "command"),
+                ("outbox_events", "attempt_id"),
+            ):
+                self.assertFalse(
+                    connection.execute(
+                        "SELECT has_column_privilege('sky_outbox',%s,%s,'UPDATE')",
+                        ("sky_state." + table, column),
+                    ).fetchone()[0]
+                )
+            self.assertTrue(
+                connection.execute(
+                    "SELECT has_column_privilege('sky_outbox','sky_state.outbox_events','published_at','UPDATE')"
+                ).fetchone()[0]
+            )
+
+    def test_outbox_cannot_assume_api_identity(self):
+        with (
+            self.outbox() as connection,
+            self.assertRaises(self.psycopg.errors.InsufficientPrivilege),
+        ):
+            connection.execute("SET ROLE sky_api")
+
+    def test_outbox_send_failure_releases_claim_and_keeps_durable_failure(self):
+        from adapters.state.operations import PostgresOperationStore
+        from application.outbox import OutboxPublisher
+
+        workspace = uuid4().hex
+        admission = PostgresOperationStore(
+            self.api, workspace=workspace, outbox_max_attempts=1
+        ).admit("probe", "deploy", "failed-send", {"source": "fixture"})
+        store = PostgresOperationStore(self.outbox, workspace=workspace)
+
+        class UncertainQueue:
+            def publish(self, delivery):
+                raise OSError("Send outcome uncertain")
+
+        report = OutboxPublisher(store, UncertainQueue(), "publisher").dispatch_once()
+        self.assertEqual((report.confirmed, report.deferred), (0, 1))
+        failed = store.list_failed_outbox()
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(failed[0].operation_id, admission.id)
+        self.assertEqual(store.get(admission.id).status, "queued")
 
 
 if __name__ == "__main__":
