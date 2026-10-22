@@ -39,3 +39,18 @@ variable "state_db_multi_az" {
   type        = bool
   default     = false
 }
+variable "enable_ssm_bridge" {
+  description = "Explicitly enable the no-ingress private management bridge"
+  type        = bool
+  default     = false
+}
+
+variable "ssm_bridge_ami_id" {
+  description = "Operator-pinned Amazon Linux 2023 arm64 image, verified against Amazon ownership"
+  type        = string
+  default     = null
+  validation {
+    condition     = !var.enable_ssm_bridge || can(regex("^ami-[0-9a-f]{17}$", var.ssm_bridge_ami_id))
+    error_message = "An immutable AMI ID is required when enabling the SSM bridge."
+  }
+}

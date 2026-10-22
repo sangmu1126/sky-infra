@@ -24,3 +24,11 @@ output "task_security_group_id" {
 output "state_database_id" {
   value = module.state_db.identifier
 }
+output "ssm_database_forwarding" {
+  value = var.enable_ssm_bridge ? {
+    instance_id   = aws_instance.ssm_bridge[0].id
+    document_name = "AWS-StartPortForwardingSessionToRemoteHost"
+    database_host = module.state_db.address
+    database_port = module.state_db.port
+  } : null
+}

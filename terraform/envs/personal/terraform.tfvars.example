@@ -1,0 +1,6 @@
+# Copy to ignored terraform.tfvars. No credentials belong in this file.
+aws_account_id = "000000000000"
+
+# Enable only after choosing an Amazon-owned AL2023 arm64 AMI in Seoul.
+enable_ssm_bridge = false
+# ssm_bridge_ami_id = "ami-<17 hexadecimal characters>"
