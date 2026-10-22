@@ -1,6 +1,6 @@
 # Trusted publisher only. No user code, Docker socket, public listener or deployment permissions.
 locals {
-  outbox_trust = jsonencode({
+  ecs_task_trust = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "ecs-tasks.amazonaws.com" }
@@ -69,7 +69,7 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_publisher" {
 resource "aws_iam_role" "outbox_task" {
   count              = var.enable_outbox_service ? 1 : 0
   name               = "${var.name_prefix}-outbox-task"
-  assume_role_policy = local.outbox_trust
+  assume_role_policy = local.ecs_task_trust
 }
 
 resource "aws_iam_role_policy" "outbox_task" {
@@ -94,7 +94,7 @@ resource "aws_cloudwatch_log_group" "outbox" {
 resource "aws_iam_role" "outbox_execution" {
   count              = var.enable_outbox_service ? 1 : 0
   name               = "${var.name_prefix}-outbox-execution"
-  assume_role_policy = local.outbox_trust
+  assume_role_policy = local.ecs_task_trust
 }
 
 resource "aws_iam_role_policy" "outbox_execution" {

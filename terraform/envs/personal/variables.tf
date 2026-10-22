@@ -74,3 +74,21 @@ variable "outbox_service_image" {
     error_message = "Pin a reviewed sky-platform image digest in the expected account and region."
   }
 }
+
+variable "enable_api_role" {
+  description = "Create a restricted API runtime role without starting a hosted API service"
+  type        = bool
+  default     = false
+}
+
+variable "api_operator_principal_arn" {
+  description = "Optional exact same-account IAM operator for local STS verification; leave null for ECS-only trust"
+  type        = string
+  default     = null
+  validation {
+    condition = var.api_operator_principal_arn == null || (
+      var.enable_api_role && can(regex("^arn:aws:iam::${var.aws_account_id}:(user|role)/[A-Za-z0-9+=,.@_/-]+$", var.api_operator_principal_arn))
+    )
+    error_message = "Enable the API role and specify an exact same-account IAM user/role ARN, or leave operator trust null."
+  }
+}
