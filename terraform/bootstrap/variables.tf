@@ -15,3 +15,12 @@ variable "noncurrent_version_days" {
   type        = number
   default     = 90
 }
+variable "aws_account_id" {
+  description = "Optional account fence; personal bootstrap supplies the expected account explicitly"
+  type        = string
+  default     = null
+  validation {
+    condition     = var.aws_account_id == null ? true : can(regex("^[0-9]{12}$", var.aws_account_id))
+    error_message = "aws_account_id must be a 12-digit AWS account ID."
+  }
+}

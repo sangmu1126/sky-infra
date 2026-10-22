@@ -37,13 +37,15 @@ jobs:
         run: python3 -m unittest discover -s scripts
       - name: validate
         run: |
-          for dir in terraform/bootstrap terraform/envs/dev; do
+          for dir in terraform/bootstrap terraform/envs/dev terraform/envs/personal; do
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
           done
       # 자격 증명 없이 mock provider로 빈 계정 첫 plan을 돌린다.
       - name: First plan with mock provider
         run: terraform -chdir=terraform/envs/dev test
+      - name: Personal foundation with mock provider
+        run: terraform -chdir=terraform/envs/personal test
 
   plan:
     # 역할이 만들어지고 저장소 변수가 설정된 뒤부터 동작한다.
