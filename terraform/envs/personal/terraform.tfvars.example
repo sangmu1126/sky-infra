@@ -4,3 +4,7 @@ aws_account_id = "000000000000"
 # Enable only after choosing an Amazon-owned AL2023 arm64 AMI in Seoul.
 enable_ssm_bridge = false
 # ssm_bridge_ami_id = "ami-<17 hexadecimal characters>"
+
+# Trusted publisher only; provision state-outbox credentials before enabling.
+enable_outbox_service = false
+# outbox_service_image = "000000000000.dkr.ecr.ap-northeast-2.amazonaws.com/sky-platform@sha256:<64 hexadecimal characters>"

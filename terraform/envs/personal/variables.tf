@@ -54,3 +54,23 @@ variable "ssm_bridge_ami_id" {
     error_message = "An immutable AMI ID is required when enabling the SSM bridge."
   }
 }
+
+variable "enable_outbox_service" {
+  description = "Explicitly enable the persistent publisher; no ZIP build or deployment consumer"
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.enable_outbox_service || var.enable_ssm_bridge
+    error_message = "The personal publisher currently requires the existing outbound gateway."
+  }
+}
+
+variable "outbox_service_image" {
+  description = "Reviewed personal sky-platform ECR image pinned by manifest digest"
+  type        = string
+  default     = null
+  validation {
+    condition     = !var.enable_outbox_service || can(regex("^${var.aws_account_id}\\.dkr\\.ecr\\.${var.region}\\.amazonaws\\.com/sky-platform@sha256:[0-9a-f]{64}$", var.outbox_service_image))
+    error_message = "Pin a reviewed sky-platform image digest in the expected account and region."
+  }
+}

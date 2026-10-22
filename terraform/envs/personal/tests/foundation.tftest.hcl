@@ -1,4 +1,7 @@
 mock_provider "aws" {
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::123456789012:role/mock-runtime" }
+  }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "123456789012" }
   }
@@ -8,8 +11,10 @@ mock_provider "aws" {
 }
 
 variables {
-  aws_account_id    = "123456789012"
-  enable_ssm_bridge = false
+  aws_account_id        = "123456789012"
+  enable_ssm_bridge     = false
+  enable_outbox_service = false
+  outbox_service_image  = null
 }
 
 run "private_foundation" {
@@ -74,4 +79,45 @@ run "bridge_has_no_database_credentials" {
     condition     = aws_vpc_security_group_ingress_rule.database_from_bridge[0].from_port == 5432 && aws_vpc_security_group_ingress_rule.database_from_bridge[0].to_port == 5432
     error_message = "Bridge network access must be limited to PostgreSQL."
   }
+}
+
+run "publisher_is_trusted_send_only_service" {
+  command = apply
+  variables {
+    enable_ssm_bridge     = true
+    ssm_bridge_ami_id     = "ami-0123456789abcdef0"
+    enable_outbox_service = true
+    outbox_service_image  = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/sky-platform@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+  assert {
+    condition     = toset(flatten([for statement in jsondecode(aws_iam_role_policy.outbox_task[0].policy).Statement : statement.Action])) == toset(["secretsmanager:GetSecretValue", "sqs:SendMessage"]) && jsondecode(aws_iam_role_policy.outbox_task[0].policy).Statement[0].Resource == aws_secretsmanager_secret.state_outbox.arn && jsondecode(aws_iam_role_policy.outbox_task[0].policy).Statement[1].Resource == module.queue.queue_arn
+    error_message = "Publisher credentials must only read their own Secret and send to the configured queue."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role.outbox_task[0].assume_role_policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == var.aws_account_id && jsondecode(aws_iam_role.outbox_task[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == "arn:aws:ecs:${var.region}:${var.aws_account_id}:*"
+    error_message = "Task role trust must be scoped to the configured AWS account/region."
+  }
+  assert {
+    condition     = jsondecode(aws_ecs_task_definition.outbox[0].container_definitions)[0].readonlyRootFilesystem && jsondecode(aws_ecs_task_definition.outbox[0].container_definitions)[0].user == "65534:65534" && length(try(jsondecode(aws_ecs_task_definition.outbox[0].container_definitions)[0].mountPoints, [])) == 0 && length(try(jsondecode(aws_ecs_task_definition.outbox[0].container_definitions)[0].portMappings, [])) == 0
+    error_message = "Publisher must run nonroot, readonly, without sockets, mounted workspaces or public listeners."
+  }
+  assert {
+    condition     = join(" ", jsondecode(aws_ecs_task_definition.outbox[0].container_definitions)[0].command) == "worker --mode outbox --interval 15" && aws_ecs_service.outbox[0].desired_count == 1 && !aws_ecs_service.outbox[0].enable_execute_command
+    error_message = "The service may only start a single outbox publisher, not a deployment consumer or remote shell."
+  }
+  assert {
+    condition     = aws_subnet.publisher[0].cidr_block != aws_subnet.bridge[0].cidr_block && aws_vpc_security_group_ingress_rule.database_from_publisher[0].referenced_security_group_id == aws_security_group.publisher[0].id && aws_vpc_security_group_ingress_rule.database_from_publisher[0].cidr_ipv4 == null
+    error_message = "Publisher must use its own subnet and security-group-only PostgreSQL access."
+  }
+}
+
+run "publisher_rejects_mutable_image_tag" {
+  command = plan
+  variables {
+    enable_ssm_bridge     = true
+    ssm_bridge_ami_id     = "ami-0123456789abcdef0"
+    enable_outbox_service = true
+    outbox_service_image  = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/sky-platform:latest"
+  }
+  expect_failures = [var.outbox_service_image]
 }
