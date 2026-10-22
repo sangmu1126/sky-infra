@@ -1,0 +1,156 @@
+"""Real PostgreSQL authorization tests; credentials are disposable loopback-only fixtures."""
+
+import hashlib
+import json
+import os
+import unittest
+from uuid import uuid4
+
+from state_api_role import ROLE, provision
+
+
+@unittest.skipUnless(
+    os.environ.get("SKY_ROLE_TEST_DSN"), "Disposable PostgreSQL DSN required"
+)
+class StateApiRoleTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import psycopg
+        from psycopg import sql
+        from interfaces.b_runtime import run_migrations
+
+        cls.psycopg = psycopg
+        cls.dsn = psycopg.conninfo.conninfo_to_dict(os.environ["SKY_ROLE_TEST_DSN"])
+        if cls.dsn.get("host") not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("Only disposable loopback test databases are accepted")
+        cls.password = "fixture-" + uuid4().hex
+        with psycopg.connect(**cls.dsn) as connection:
+            connection.execute("CREATE ROLE state_role_test_owner CREATEROLE NOLOGIN")
+            database = connection.execute("SELECT current_database()").fetchone()[0]
+            connection.execute(
+                sql.SQL("ALTER DATABASE {} OWNER TO state_role_test_owner").format(
+                    sql.Identifier(database)
+                )
+            )
+            # The non-superuser owner exercises PostgreSQL's automatic creator membership.
+        run_migrations(
+            cls.admin,
+            "role_contract",
+            account_id="123456789012",
+            region="ap-northeast-2",
+        )
+        with cls.admin() as connection:
+            provision(connection, cls.password)
+
+    @classmethod
+    def admin(cls):
+        connection = cls.psycopg.connect(**cls.dsn)
+        connection.execute("SET ROLE state_role_test_owner")
+        return connection
+
+    @classmethod
+    def api(cls):
+        return cls.psycopg.connect(
+            **{**cls.dsn, "user": ROLE, "password": cls.password}
+        )
+
+    def test_role_is_unprivileged_and_has_bounded_sessions(self):
+        with self.api() as connection:
+            row = connection.execute(
+                "SELECT rolsuper,rolcreatedb,rolcreaterole,rolinherit,rolreplication,rolbypassrls,rolconnlimit FROM pg_roles WHERE rolname=current_user"
+            ).fetchone()
+            self.assertEqual(row, (False, False, False, False, False, False, 20))
+            self.assertEqual(
+                connection.execute("SELECT current_schemas(false)").fetchone()[0],
+                ["pg_catalog", "sky_state"],
+            )
+
+    def test_readiness_is_available_to_api(self):
+        from adapters.state.readiness import check_database_ready
+
+        check_database_ready(self.api, operations=True)
+
+    def test_existing_role_is_reconciled_without_privilege_expansion(self):
+        with self.admin() as connection:
+            provision(connection, self.password)
+        self.test_readiness_is_available_to_api()
+
+    def test_actual_api_admission_preserves_replay_and_worker_boundary(self):
+        from adapters.state.deployment_admission import PostgresDeploymentAdmission
+        from adapters.state.operations import PostgresOperationStore
+        from domain.access import LoginSource, Principal, Role
+        from ports.artifacts import SourceArtifact
+
+        store = PostgresDeploymentAdmission(
+            PostgresOperationStore(self.api, workspace=uuid4().hex),
+            account_id="123456789012",
+            region="ap-northeast-2",
+        )
+        principal = Principal("alice", "role_test", Role.DEPLOYER, LoginSource.LOCAL)
+        artifact = SourceArtifact(
+            "role_test", "probe", "a" * 32, "prepared", "b" * 64, 10, "c" * 64
+        )
+        plan = {"runtime": "node"}
+        digest = hashlib.sha256(
+            json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        first = store.admit(
+            principal,
+            artifact,
+            "one",
+            plan,
+            expected_plan_digest=digest,
+            expected_source_digest=artifact.source_digest,
+        )
+        self.assertEqual(
+            first,
+            store.admit(
+                principal,
+                artifact,
+                "one",
+                plan,
+                expected_plan_digest=digest,
+                expected_source_digest=artifact.source_digest,
+            ),
+        )
+        self.assertEqual(store.operations.get(first.operation_id).status, "queued")
+
+    def test_denied_sql_never_commits(self):
+        statements = [
+            "CREATE TABLE sky_state.role_probe(i integer)",
+            "CREATE TABLE public.role_probe(i integer)",
+            "CREATE TEMP TABLE role_probe(i integer)",
+            "CREATE ROLE role_probe",
+            "UPDATE sky_state.schema_versions SET version=version WHERE false",
+            "UPDATE sky_state.operations SET status=status WHERE false",
+            "UPDATE sky_state.outbox_events SET publisher_owner=NULL WHERE false",
+            "DELETE FROM sky_state.metadata_records WHERE false",
+        ]
+        for statement in statements:
+            with self.subTest(statement=statement), self.api() as connection:
+                with self.assertRaises(self.psycopg.errors.InsufficientPrivilege):
+                    with connection.transaction(force_rollback=True):
+                        connection.execute(statement)
+
+    def test_rejects_unsafe_password_before_changes(self):
+        with self.admin() as connection, self.assertRaises(ValueError):
+            provision(connection, "short")
+
+    def test_rejects_unregistered_existing_role(self):
+        with self.admin() as connection:
+            with connection.transaction(force_rollback=True):
+                connection.execute("COMMENT ON ROLE sky_api IS 'not-registered'")
+                with self.assertRaises(ValueError):
+                    provision(connection, self.password)
+
+    def test_rejects_api_role_membership(self):
+        with self.admin() as connection:
+            with connection.transaction(force_rollback=True):
+                connection.execute("CREATE ROLE role_probe")
+                connection.execute("GRANT role_probe TO sky_api")
+                with self.assertRaises(ValueError):
+                    provision(connection, self.password)
+
+
+if __name__ == "__main__":
+    unittest.main()

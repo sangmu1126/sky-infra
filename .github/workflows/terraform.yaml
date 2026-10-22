@@ -25,6 +25,37 @@ env:
   TF_VERSION: "1.15.8"
 
 jobs:
+  state-role:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: role_admin
+          POSTGRES_PASSWORD: disposable-role-test-password
+          POSTGRES_DB: role_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U role_admin -d role_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: sangmu1126/sky-platform
+          ref: eec3e15e790fe367afd2b5ce0b2e803567944614
+          path: state-role-platform
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install 'psycopg[binary]>=3.2,<4'
+      - run: python -m unittest discover -s scripts -p test_state_api_role.py
+        env:
+          PYTHONPATH: state-role-platform/src
+          SKY_ROLE_TEST_DSN: "host=127.0.0.1 port=5432 user=role_admin password=disposable-role-test-password dbname=role_test sslmode=disable"
   static:
     runs-on: ubuntu-latest
     steps:
@@ -50,7 +81,7 @@ jobs:
   plan:
     # 역할이 만들어지고 저장소 변수가 설정된 뒤부터 동작한다.
     if: github.event_name == 'pull_request' && vars.AWS_PLAN_ROLE_ARN != ''
-    needs: static
+    needs: [static, state-role]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -85,7 +116,7 @@ jobs:
 
   apply:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    needs: static
+    needs: [static, state-role]
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     permissions:

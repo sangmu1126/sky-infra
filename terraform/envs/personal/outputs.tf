@@ -1,16 +1,28 @@
-output "runtime_environment" {
-  description = "Non-secret connection references; API/worker/auth are not deployed yet"
-  value = {
-    SKY_AWS_ACCOUNT_ID      = var.aws_account_id
-    SKY_AWS_REGION          = var.region
-    SKY_STATE_WORKSPACE     = "personal"
-    SKY_DATABASE_HOST       = module.state_db.address
-    SKY_DATABASE_PORT       = tostring(module.state_db.port)
-    SKY_DATABASE_NAME       = module.state_db.database_name
-    SKY_DATABASE_SECRET_ARN = module.state_db.master_secret_arn
-    SKY_ARTIFACTS_BUCKET    = module.artifacts.bucket_name
-    SKY_JOB_QUEUE_URL       = module.queue.queue_url
+locals {
+  state_environment = {
+    SKY_AWS_ACCOUNT_ID   = var.aws_account_id
+    SKY_AWS_REGION       = var.region
+    SKY_STATE_WORKSPACE  = "personal"
+    SKY_DATABASE_HOST    = module.state_db.address
+    SKY_DATABASE_PORT    = tostring(module.state_db.port)
+    SKY_DATABASE_NAME    = module.state_db.database_name
+    SKY_ARTIFACTS_BUCKET = module.artifacts.bucket_name
+    SKY_JOB_QUEUE_URL    = module.queue.queue_url
   }
+}
+
+output "runtime_environment" {
+  description = "API-only connection references; workers require their own identity"
+  value = merge(local.state_environment, {
+    SKY_DATABASE_SECRET_ARN = aws_secretsmanager_secret.state_api.arn
+  })
+}
+
+output "migration_environment" {
+  description = "Administrator references for explicit provisioning/migrations only"
+  value = merge(local.state_environment, {
+    SKY_DATABASE_SECRET_ARN = module.state_db.master_secret_arn
+  })
 }
 
 output "vpc_id" {
