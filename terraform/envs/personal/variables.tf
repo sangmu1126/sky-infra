@@ -128,3 +128,19 @@ variable "api_memberships" {
     error_message = "Register unique Cognito subjects and explicit bounded internal users/roles."
   }
 }
+
+variable "enable_builder_role" {
+  description = "Explicitly create the personal builder prepare/publish role; no workflow or consumer activation"
+  type        = bool
+  default     = false
+}
+
+variable "builder_oidc_subject" {
+  description = "Exact GitHub immutable subject from the personal sky-builder OIDC configuration, main branch only"
+  type        = string
+  default     = null
+  validation {
+    condition     = !var.enable_builder_role || can(regex("^repo:sangmu1126@[0-9]+/sky-builder@[0-9]+:ref:refs/heads/main$", var.builder_oidc_subject))
+    error_message = "Verify the personal builder owner/repository numeric IDs and pin its exact immutable main-branch subject."
+  }
+}

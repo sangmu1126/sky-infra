@@ -25,6 +25,8 @@ mock_provider "aws" {
 }
 
 variables {
+  enable_builder_role        = false
+  builder_oidc_subject       = null
   enable_public_api          = false
   public_api_image           = null
   api_memberships            = []

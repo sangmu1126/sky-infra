@@ -18,3 +18,9 @@ api_operator_principal_arn = null
 enable_public_api = false
 public_api_image = null
 api_memberships = [] # Register subjects explicitly; no user or grant is auto-created.
+
+# Existing GitHub OIDC provider and sky-managed ECR repository are reused.
+# Read the repository's OIDC customization and verify its numeric IDs first.
+enable_builder_role = false
+builder_oidc_subject = null
+# builder_oidc_subject = "repo:sangmu1126@<owner-id>/sky-builder@<repo-id>:ref:refs/heads/main"
