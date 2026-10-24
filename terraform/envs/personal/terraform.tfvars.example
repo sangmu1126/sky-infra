@@ -24,3 +24,7 @@ api_memberships = [] # Register subjects explicitly; no user or grant is auto-cr
 enable_builder_role = false
 builder_oidc_subject = null
 # builder_oidc_subject = "repo:sangmu1126@<owner-id>/sky-builder@<repo-id>:ref:refs/heads/main"
+
+# Provision sky_build via the explicit SQL helper before any consumer activation.
+# The Secret value is published outside Terraform; GitHub App remains separate.
+enable_build_worker_role = false

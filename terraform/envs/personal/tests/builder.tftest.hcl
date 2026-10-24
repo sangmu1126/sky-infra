@@ -13,6 +13,7 @@ mock_provider "aws" {
   }
 }
 variables {
+  enable_build_worker_role   = false
   aws_account_id             = "123456789012"
   enable_public_api          = false
   public_api_image           = null
@@ -79,4 +80,30 @@ run "builder_rejects_missing_subject" {
     builder_oidc_subject = null
   }
   expect_failures = [var.builder_oidc_subject]
+}
+
+run "build_worker_is_opt_in" {
+  command = plan
+  assert {
+    condition     = length(aws_iam_role.build_worker) == 0 && length(aws_secretsmanager_secret.state_build) == 0 && output.build_worker_environment == null
+    error_message = "Worker credentials must require an explicit opt-in."
+  }
+}
+run "build_worker_is_not_api_publisher_or_deployer" {
+  command = apply
+  variables {
+    enable_build_worker_role = true
+  }
+  assert {
+    condition     = toset(flatten([for s in jsondecode(aws_iam_role_policy.build_worker[0].policy).Statement : s.Action])) == toset(["secretsmanager:GetSecretValue", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility", "s3:GetObject", "s3:PutObject", "ecr:BatchGetImage", "ecs:UpdateTaskProtection"])
+    error_message = "Worker must not admit via SQS send, push images, read other Secrets or create/deploy resources."
+  }
+  assert {
+    condition     = output.build_worker_environment.SKY_DATABASE_SECRET_ARN == aws_secretsmanager_secret.state_build[0].arn && output.build_worker_environment.SKY_DATABASE_SECRET_ARN != output.runtime_environment.SKY_DATABASE_SECRET_ARN && output.build_worker_environment.SKY_DATABASE_SECRET_ARN != output.outbox_environment.SKY_DATABASE_SECRET_ARN
+    error_message = "API, publisher and worker must use independent database credentials."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.build_worker[0].policy).Statement[3].Resource == "${module.artifacts.bucket_arn}/sources/personal/*/*/build-requests/*" && jsondecode(aws_iam_role_policy.build_worker[0].policy).Statement[3].Condition.StringEquals["s3:x-amz-server-side-encryption"] == "AES256"
+    error_message = "Worker may only write encrypted request records, not upload/prepared source archives or build results."
+  }
 }

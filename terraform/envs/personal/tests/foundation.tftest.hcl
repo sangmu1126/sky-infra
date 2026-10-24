@@ -25,6 +25,7 @@ mock_provider "aws" {
 }
 
 variables {
+  enable_build_worker_role   = false
   enable_builder_role        = false
   builder_oidc_subject       = null
   enable_public_api          = false

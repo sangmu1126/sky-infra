@@ -44,6 +44,9 @@ class StateApiRoleTest(unittest.TestCase):
             from state_outbox_role import provision as provision_outbox
 
             provision_outbox(connection, cls.password)
+            from state_build_role import provision as provision_build
+
+            provision_build(connection, cls.password)
 
     @classmethod
     def admin(cls):
@@ -272,6 +275,118 @@ class StateApiRoleTest(unittest.TestCase):
         self.assertEqual(len(failed), 1)
         self.assertEqual(failed[0].operation_id, admission.id)
         self.assertEqual(store.get(admission.id).status, "queued")
+
+    @classmethod
+    def build(cls):
+        return cls.psycopg.connect(
+            **{**cls.dsn, "user": "sky_build", "password": cls.password}
+        )
+
+    def test_build_worker_readiness_uses_no_admission_or_admin_rights(self):
+        from adapters.state.build_execution import PostgresBuildExecutionStore
+        from adapters.state.deployment_admission import PostgresDeploymentAdmission
+        from adapters.state.deployment_approvals import PostgresDeploymentApprovals
+
+        PostgresDeploymentApprovals(
+            PostgresDeploymentAdmission(
+                PostgresBuildExecutionStore(self.build),
+                account_id="123456789012",
+                region="ap-northeast-2",
+            )
+        ).check_ready()
+        with self.build() as connection:
+            row = connection.execute(
+                "SELECT rolsuper,rolcreatedb,rolcreaterole,rolinherit,rolreplication,rolbypassrls,rolconnlimit FROM pg_roles WHERE rolname=current_user"
+            ).fetchone()
+            self.assertEqual(row, (False, False, False, False, False, False, 20))
+
+    def test_build_worker_claims_records_and_completes_admitted_operation(self):
+        from adapters.state.operations import PostgresOperationStore
+
+        workspace = uuid4().hex
+        admitted = PostgresOperationStore(self.api, workspace=workspace).admit(
+            "worker_probe", "deploy", "build-proof", {"source": "immutable"}
+        )
+        worker = PostgresOperationStore(self.build, workspace=workspace)
+        lease = worker.claim(admitted.id, admitted.attempt_id, "worker")
+        self.assertIsNotNone(lease)
+        self.assertTrue(worker.heartbeat(lease))
+        self.assertTrue(worker.checkpoint(lease, {"stage": "building"}))
+        self.assertTrue(worker.begin_external(lease, {"kind": "probe"}))
+        self.assertTrue(
+            worker.observe_external(lease, {"verified": True}, {"stage": "build_ready"})
+        )
+        self.assertTrue(worker.complete(lease, {"verified": True}))
+        self.assertEqual(worker.get(admitted.id).status, "succeeded")
+        self.assertEqual(worker.get(admitted.id).command, {"source": "immutable"})
+
+    def test_build_worker_recovers_expired_attempt_or_parks_uncertain_effect(self):
+        from adapters.state.operations import PostgresOperationStore
+
+        for pending in (False, True):
+            workspace = uuid4().hex
+            admitted = PostgresOperationStore(self.api, workspace=workspace).admit(
+                "recovery_probe", "deploy", "recover", {}
+            )
+            worker = PostgresOperationStore(self.build, workspace=workspace)
+            lease = worker.claim(admitted.id, admitted.attempt_id, "worker")
+            if pending:
+                worker.begin_external(lease, {"kind": "probe"})
+            with self.admin() as connection:
+                connection.execute(
+                    "UPDATE sky_state.operations SET lease_until=clock_timestamp()-interval '1 second' WHERE workspace=%s AND id=%s",
+                    (workspace, admitted.id),
+                )
+            self.assertEqual(worker.recover_expired(), (admitted.id,))
+            recovered = worker.get(admitted.id)
+            self.assertEqual(
+                recovered.status, "needs_attention" if pending else "queued"
+            )
+            with self.admin() as connection:
+                count = connection.execute(
+                    "SELECT count(*) FROM sky_state.outbox_events WHERE workspace=%s",
+                    (workspace,),
+                ).fetchone()[0]
+                self.assertEqual(count, 1 if pending else 2)
+
+    def test_build_worker_cannot_admit_rewrite_approval_or_publish(self):
+        for statement in (
+            "CREATE TABLE sky_state.build_probe(i integer)",
+            "CREATE TEMP TABLE build_probe(i integer)",
+            "CREATE ROLE build_probe",
+            "INSERT INTO sky_state.operations(workspace) SELECT 'probe' WHERE false",
+            "DELETE FROM sky_state.operations WHERE false",
+            "UPDATE sky_state.operations SET command=command WHERE false",
+            "UPDATE sky_state.operations SET application_id=application_id WHERE false",
+            "INSERT INTO sky_state.metadata_records(workspace) SELECT 'probe' WHERE false",
+            "UPDATE sky_state.metadata_records SET record_id=record_id WHERE false",
+            "DELETE FROM sky_state.metadata_records WHERE false",
+            "UPDATE sky_state.deployment_approvals SET revoked_at=NULL WHERE false",
+            "UPDATE sky_state.application_owners SET created_by=created_by WHERE false",
+            "UPDATE sky_state.outbox_events SET published_at=NULL WHERE false",
+            "DELETE FROM sky_state.operation_events WHERE false",
+        ):
+            with (
+                self.subTest(statement=statement),
+                self.build() as connection,
+                self.assertRaises(self.psycopg.errors.InsufficientPrivilege),
+                connection.transaction(force_rollback=True),
+            ):
+                connection.execute(statement)
+
+    def test_build_worker_reprovision_removes_unreviewed_column_grants(self):
+        from state_build_role import provision as provision_build
+
+        with self.admin() as connection, connection.transaction(force_rollback=True):
+            connection.execute(
+                "GRANT UPDATE(command) ON sky_state.operations TO sky_build"
+            )
+            provision_build(connection, self.password)
+            self.assertFalse(
+                connection.execute(
+                    "SELECT has_column_privilege('sky_build','sky_state.operations','command','UPDATE')"
+                ).fetchone()[0]
+            )
 
 
 if __name__ == "__main__":

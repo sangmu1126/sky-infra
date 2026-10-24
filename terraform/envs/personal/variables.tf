@@ -144,3 +144,9 @@ variable "builder_oidc_subject" {
     error_message = "Verify the personal builder owner/repository numeric IDs and pin its exact immutable main-branch subject."
   }
 }
+
+variable "enable_build_worker_role" {
+  description = "Create a separate build-consumer role and SQL Secret container; no worker service or deployment permissions"
+  type        = bool
+  default     = false
+}
