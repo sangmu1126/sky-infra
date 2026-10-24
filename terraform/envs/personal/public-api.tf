@@ -3,6 +3,7 @@ locals {
   public_api_environment = var.enable_public_api ? merge(local.state_environment, {
     SKY_DATABASE_SECRET_ARN         = aws_secretsmanager_secret.state_api.arn
     SKY_DEPLOYMENT_CONSUMER_ENABLED = "false"
+    TMPDIR                          = "/scratch/work"
     SKY_COGNITO_LOGIN_DOMAIN        = "https://${aws_cognito_user_pool_domain.api[0].domain}.auth.${var.region}.amazoncognito.com"
     SKY_COGNITO_AUTH_JSON = jsonencode({
       version = 1, issuer = "https://${aws_cognito_user_pool.api[0].endpoint}", client_id = aws_cognito_user_pool_client.api[0].id, required_scopes = ["sky/deploy"]
@@ -110,11 +111,16 @@ resource "aws_ecs_task_definition" "public_api" {
     operating_system_family = "LINUX"
     cpu_architecture        = "X86_64"
   }
+  volume {
+    name = "api-scratch" # Task-local ephemeral storage; no host path or durable app state.
+  }
   container_definitions = jsonencode([{
     name            = "api", image = var.public_api_image, essential = true, user = "65534:65534", readonlyRootFilesystem = true
     command         = ["api", "--host", "0.0.0.0", "--port", "8080", "--auth-mode", "cognito", "--enable-preparation", "--origin", local.api_origin]
     environment     = [for name, value in local.public_api_environment : { name = name, value = value }]
-    mountPoints     = [], systemControls = [], volumesFrom = []
+    mountPoints     = [{ sourceVolume = "api-scratch", containerPath = "/scratch", readOnly = false }]
+    systemControls  = [], volumesFrom = []
+    dependsOn       = [{ containerName = "prepare-scratch", condition = "SUCCESS" }]
     portMappings    = [{ containerPort = 8080, hostPort = 8080, protocol = "tcp" }]
     linuxParameters = { capabilities = { add = [], drop = ["ALL"] } }
     stopTimeout     = 30
@@ -125,6 +131,16 @@ resource "aws_ecs_task_definition" "public_api" {
       logDriver = "awslogs"
       options   = { awslogs-group = aws_cloudwatch_log_group.public_api[0].name, awslogs-region = var.region, awslogs-stream-prefix = "api" }
     }
+    }, {
+    name       = "prepare-scratch", image = var.public_api_image, essential = false
+    user       = "0:0", readonlyRootFilesystem = true
+    entryPoint = ["python", "-c"]
+    # Root owns the fresh mount. chmod of its own directory needs no added capabilities.
+    # Sticky mode and private TemporaryDirectory children match normal /tmp semantics.
+    command         = ["import os; os.makedirs('/scratch/work', mode=0o1777, exist_ok=True); os.chmod('/scratch/work', 0o1777)"]
+    mountPoints     = [{ sourceVolume = "api-scratch", containerPath = "/scratch", readOnly = false }]
+    portMappings    = [], systemControls = [], volumesFrom = []
+    linuxParameters = { capabilities = { add = [], drop = ["ALL"] } }
   }])
 }
 resource "aws_ecs_service" "public_api" {

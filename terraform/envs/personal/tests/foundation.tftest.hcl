@@ -244,7 +244,7 @@ run "public_api_has_private_origin_and_scoped_runtime" {
     error_message = "HTTPS entry must disable caching and forward authorization/origin headers."
   }
   assert {
-    condition     = aws_ecs_task_definition.public_api[0].task_role_arn == aws_iam_role.api_task[0].arn && jsondecode(aws_ecs_task_definition.public_api[0].container_definitions)[0].user == "65534:65534" && jsondecode(aws_ecs_task_definition.public_api[0].container_definitions)[0].readonlyRootFilesystem && length(jsondecode(aws_ecs_task_definition.public_api[0].container_definitions)[0].mountPoints) == 0 && aws_ecs_service.public_api[0].desired_count == 1 && !aws_ecs_service.public_api[0].enable_execute_command
+    condition     = aws_ecs_task_definition.public_api[0].task_role_arn == aws_iam_role.api_task[0].arn && jsondecode(aws_ecs_task_definition.public_api[0].container_definitions)[0].user == "65534:65534" && jsondecode(aws_ecs_task_definition.public_api[0].container_definitions)[0].readonlyRootFilesystem && length(jsondecode(aws_ecs_task_definition.public_api[0].container_definitions)[0].mountPoints) == 1 && jsondecode(aws_ecs_task_definition.public_api[0].container_definitions)[0].mountPoints[0].sourceVolume == "api-scratch" && jsondecode(aws_ecs_task_definition.public_api[0].container_definitions)[0].dependsOn[0].condition == "SUCCESS" && !jsondecode(aws_ecs_task_definition.public_api[0].container_definitions)[1].essential && one(aws_ecs_task_definition.public_api[0].volume).host_path == null && aws_ecs_service.public_api[0].desired_count == 1 && !aws_ecs_service.public_api[0].enable_execute_command
     error_message = "API must remain a nonroot, readonly, socket-free trusted task with its restricted role."
   }
   assert {
