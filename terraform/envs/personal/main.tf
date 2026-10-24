@@ -1,5 +1,5 @@
-# Private personal foundation with an opt-in trusted outbox publisher.
-# No public ingress, NAT, API, build worker or deployment consumer is enabled here.
+# Private personal foundation with explicit publisher and HTTPS API opt-ins.
+# No NAT, build worker or deployment consumer; public hosting is disabled by default.
 terraform {
   required_version = ">= 1.10.0"
   required_providers {

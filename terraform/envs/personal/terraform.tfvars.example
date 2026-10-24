@@ -8,3 +8,13 @@ enable_ssm_bridge = false
 # Trusted publisher only; provision state-outbox credentials before enabling.
 enable_outbox_service = false
 # outbox_service_image = "000000000000.dkr.ecr.ap-northeast-2.amazonaws.com/sky-platform@sha256:<64 hexadecimal characters>"
+
+# API role is independent from the publisher; operator trust is optional and exact.
+enable_api_role = false
+api_operator_principal_arn = null
+
+# Requires a CI-verified hosted image with Cognito browser support.
+# Creates CloudFront, internal ALB, Cognito and one additional Fargate task.
+enable_public_api = false
+public_api_image = null
+api_memberships = [] # Register subjects explicitly; no user or grant is auto-created.
