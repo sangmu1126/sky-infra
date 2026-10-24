@@ -150,3 +150,37 @@ variable "enable_build_worker_role" {
   type        = bool
   default     = false
 }
+
+variable "enable_build_worker_preflight" {
+  description = "Prepare a one-shot infrastructure probe; no service, queue receive or GitHub dispatch"
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.enable_build_worker_preflight || (var.enable_build_worker_role && var.enable_outbox_service && var.enable_ssm_bridge)
+    error_message = "Preflight requires the separate worker identity and existing publisher/gateway cluster."
+  }
+}
+variable "build_worker_image" {
+  type    = string
+  default = null
+  validation {
+    condition     = !var.enable_build_worker_preflight || can(regex("^${var.aws_account_id}\\.dkr\\.ecr\\.${var.region}\\.amazonaws\\.com/sky-platform@sha256:[0-9a-f]{64}$", var.build_worker_image))
+    error_message = "Use a CI-verified personal hosted image pinned by digest."
+  }
+}
+variable "build_worker_builder_sha" {
+  type    = string
+  default = null
+  validation {
+    condition     = !var.enable_build_worker_preflight || can(regex("^[0-9a-f]{40}$", var.build_worker_builder_sha))
+    error_message = "Pin the reviewed builder workflow commit."
+  }
+}
+variable "build_worker_platform_sha" {
+  type    = string
+  default = null
+  validation {
+    condition     = !var.enable_build_worker_preflight || can(regex("^[0-9a-f]{40}$", var.build_worker_platform_sha))
+    error_message = "Pin the platform code used by the builder."
+  }
+}

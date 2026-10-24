@@ -28,3 +28,9 @@ builder_oidc_subject = null
 # Provision sky_build via the explicit SQL helper before any consumer activation.
 # The Secret value is published outside Terraform; GitHub App remains separate.
 enable_build_worker_role = false
+
+# One-shot trusted worker infrastructure check; no consumer/service activation.
+enable_build_worker_preflight = false
+build_worker_image            = null
+build_worker_builder_sha      = null
+build_worker_platform_sha     = null

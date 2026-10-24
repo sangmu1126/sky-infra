@@ -25,18 +25,22 @@ mock_provider "aws" {
 }
 
 variables {
-  enable_build_worker_role   = false
-  enable_builder_role        = false
-  builder_oidc_subject       = null
-  enable_public_api          = false
-  public_api_image           = null
-  api_memberships            = []
-  enable_api_role            = false
-  api_operator_principal_arn = null
-  aws_account_id             = "123456789012"
-  enable_ssm_bridge          = false
-  enable_outbox_service      = false
-  outbox_service_image       = null
+  enable_build_worker_preflight = false
+  build_worker_image            = null
+  build_worker_builder_sha      = null
+  build_worker_platform_sha     = null
+  enable_build_worker_role      = false
+  enable_builder_role           = false
+  builder_oidc_subject          = null
+  enable_public_api             = false
+  public_api_image              = null
+  api_memberships               = []
+  enable_api_role               = false
+  api_operator_principal_arn    = null
+  aws_account_id                = "123456789012"
+  enable_ssm_bridge             = false
+  enable_outbox_service         = false
+  outbox_service_image          = null
 }
 
 run "private_foundation" {
