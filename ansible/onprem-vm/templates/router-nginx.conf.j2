@@ -1,0 +1,29 @@
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 256; }
+http {
+    access_log /dev/stdout;
+    client_body_temp_path /tmp/client;
+    proxy_temp_path /tmp/proxy;
+    fastcgi_temp_path /tmp/fastcgi;
+    uwsgi_temp_path /tmp/uwsgi;
+    scgi_temp_path /tmp/scgi;
+    include /etc/nginx/sky/route.conf;
+    map $http_upgrade $sky_connection { default upgrade; '' close; }
+    server {
+        listen 8443 ssl;
+        ssl_certificate /etc/nginx/sky/server.crt;
+        ssl_certificate_key /etc/nginx/sky/server.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        add_header Cache-Control "no-store" always;
+        location / {
+            proxy_pass http://sky_active;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $sky_connection;
+            proxy_next_upstream off;
+            proxy_buffering off;
+        }
+    }
+}

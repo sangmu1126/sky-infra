@@ -1,0 +1,28 @@
+services:
+  router:
+    image: {{ sky_router_image | to_json }}
+    container_name: {{ sky_router_name | to_json }}
+    user: "{{ sky_router_uid }}:{{ sky_router_gid }}"
+    entrypoint: [nginx]
+    command: [-g, 'daemon off;']
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    ports: ['{{ sky_router_port }}:8443']
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=32m,uid={{ sky_router_uid }},gid={{ sky_router_gid }}']
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./route:/etc/nginx/sky
+      - ./tls/server.crt:/etc/nginx/sky/server.crt:ro
+      - ./tls/server.key:/etc/nginx/sky/server.key:ro
+    labels:
+      sky-managed: 'true'
+      sky-application: {{ sky_application_id | to_json }}
+      sky-organization: {{ sky_organization_id | to_json }}
+      sky-colour: router
+    networks: [applications]
+networks:
+  applications:
+    external: true
+    name: {{ sky_router_network | to_json }}

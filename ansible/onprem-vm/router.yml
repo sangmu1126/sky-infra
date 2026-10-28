@@ -1,0 +1,99 @@
+# Optional stable HTTPS entrypoint after site.yml has prepared the Docker host.
+# Requires operator-owned TLS files and two app containers on a labelled network.
+- name: Configure the Sky VM HTTPS router
+  hosts: sky_vms
+  become: true
+  vars:
+    sky_router_uid: 101
+    sky_router_gid: 101
+    sky_router_port: 8443
+    sky_router_root: "/opt/sky/routers/{{ sky_application_id }}"
+    sky_router_name: "sky-router-{{ sky_application_id }}"
+  pre_tasks:
+    - name: Require scoped names, immutable image and explicit TLS material
+      ansible.builtin.assert:
+        that:
+          - sky_application_id is match('^[a-z][a-z0-9_-]{2,40}$')
+          - sky_organization_id is match('^[a-z][a-z0-9_-]{2,40}$')
+          - sky_router_network is match('^[a-z][a-z0-9_-]{2,62}$')
+          - sky_blue_name is match('^[a-z][a-z0-9_-]{2,62}$')
+          - sky_blue_port | int >= 1024
+          - sky_blue_port | int <= 65535
+          - sky_router_port | int >= 1024
+          - sky_router_port | int <= 65535
+          - sky_router_image is match('^[a-z0-9./_-]+@sha256:[a-f0-9]{64}$')
+          - sky_tls_certificate_file is defined
+          - sky_tls_private_key_file is defined
+          - sky_initial_binding_sha256 is match('^[a-f0-9]{64}$')
+          - sky_router_uid | int > 0
+          - sky_router_gid | int > 0
+    - name: Inspect the registered application network
+      ansible.builtin.command:
+        argv: [docker, network, inspect, "{{ sky_router_network }}"]
+      register: router_network
+      changed_when: false
+    - name: Require an app-owned bridge network
+      ansible.builtin.assert:
+        that:
+          - (router_network.stdout | from_json)[0].Driver == 'bridge'
+          - (router_network.stdout | from_json)[0].Labels['sky-managed'] == 'true'
+          - (router_network.stdout | from_json)[0].Labels['sky-application'] == sky_application_id
+          - (router_network.stdout | from_json)[0].Labels['sky-organization'] == sky_organization_id
+  tasks:
+    - name: Create private router state directories
+      ansible.builtin.file:
+        path: "{{ sky_router_root }}/{{ item }}"
+        state: directory
+        owner: "{{ 'root' if item != 'route' else sky_router_uid }}"
+        group: "{{ 'root' if item != 'route' else sky_router_gid }}"
+        mode: "0700"
+      loop: ['', tls, route]
+    - name: Install TLS files from the operator machine
+      ansible.builtin.copy:
+        src: "{{ item.source }}"
+        dest: "{{ sky_router_root }}/tls/{{ item.name }}"
+        owner: root
+        group: root
+        mode: "0444"
+      loop:
+        - {source: "{{ sky_tls_certificate_file }}", name: server.crt}
+        - {source: "{{ sky_tls_private_key_file }}", name: server.key}
+      no_log: true
+      notify: Reload the owned router
+    - name: Create only the initial Blue route
+      ansible.builtin.copy:
+        dest: "{{ sky_router_root }}/route/route.conf"
+        content: "# sky-route-v1 {{ sky_initial_binding_sha256 }}\nupstream sky_active { server {{ sky_blue_name }}:{{ sky_blue_port }}; }\n"
+        owner: "{{ sky_router_uid }}"
+        group: "{{ sky_router_gid }}"
+        mode: "0600"
+        force: false
+    - name: Render the fixed HTTPS configuration
+      ansible.builtin.template:
+        src: router-nginx.conf.j2
+        dest: "{{ sky_router_root }}/nginx.conf"
+        owner: root
+        group: root
+        mode: "0444"
+      notify: Reload the owned router
+    - name: Render the isolated router service
+      ansible.builtin.template:
+        src: router-compose.yml.j2
+        dest: "{{ sky_router_root }}/compose.yml"
+        owner: root
+        group: root
+        mode: "0600"
+    - name: Start the pinned router without building application code
+      ansible.builtin.command:
+        argv: [docker, compose, --project-name, "sky-router-{{ sky_application_id }}", -f, "{{ sky_router_root }}/compose.yml", up, --detach, --no-build]
+      register: router_start
+      changed_when: router_start.stderr is search('(Started|Recreated|Created|Starting|Recreating|Creating)')
+    - name: Validate the active Nginx configuration
+      ansible.builtin.command:
+        argv: [docker, exec, "{{ sky_router_name }}", nginx, -t]
+      changed_when: false
+  handlers:
+    - name: Reload the owned router
+      ansible.builtin.command:
+        argv: [docker, exec, "{{ sky_router_name }}", sh, -ceu, "nginx -t\nnginx -s reload"]
+      changed_when: true
