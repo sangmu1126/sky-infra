@@ -13,6 +13,7 @@ mock_provider "aws" {
   }
 }
 variables {
+  enable_shared_workload_pool   = false
   enable_build_worker_preflight = false
   build_worker_image            = null
   build_worker_builder_sha      = null

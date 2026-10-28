@@ -7,6 +7,7 @@ mock_provider "aws" {
   }
 }
 variables {
+  enable_shared_workload_pool   = false
   aws_account_id                = "123456789012"
   enable_public_api             = false
   public_api_image              = null

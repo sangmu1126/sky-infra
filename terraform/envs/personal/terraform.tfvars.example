@@ -34,3 +34,9 @@ enable_build_worker_preflight = false
 build_worker_image            = null
 build_worker_builder_sha      = null
 build_worker_platform_sha     = null
+
+# Persistent user-app DB, separate from Sky state; requires SSM bridge.
+# Operator initialization is separate; no hosted consumer is activated.
+enable_shared_workload_pool = false
+shared_workload_instance_class = "db.t4g.micro"
+shared_workload_connection_budget = 30
