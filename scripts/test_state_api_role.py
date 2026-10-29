@@ -388,6 +388,97 @@ class StateApiRoleTest(unittest.TestCase):
                 ).fetchone()[0]
             )
 
+    def test_budget_reservations_and_usage_are_append_only_under_real_runtime_roles(
+        self,
+    ):
+        from datetime import UTC, datetime, timedelta
+        from adapters.state.effect_budget import EffectBudgetPolicy
+
+        maximum = {"requests": 1, "microusd": 100}
+        policy = EffectBudgetPolicy.from_environment(
+            {
+                "SKY_EFFECT_BUDGET_JSON": json.dumps(
+                    {
+                        "version": 2,
+                        "source": "synthetic role test, not a price",
+                        "expires_at": (
+                            datetime.now(UTC) + timedelta(hours=1)
+                        ).isoformat(),
+                        "limits": {
+                            k: maximum
+                            for k in ("global", "organization", "user", "application")
+                        },
+                        "effects": {"source_preparation": maximum},
+                    }
+                )
+            }
+        )
+        workspace = uuid4().hex
+        with self.api() as connection:
+            self.assertTrue(
+                policy.reserve(
+                    connection,
+                    workspace=workspace,
+                    effect_key="role-test",
+                    organization_id="role_test",
+                    user_id="alice",
+                    application_id="probe",
+                    kind="source_preparation",
+                    binding={"source": "a" * 64},
+                )
+            )
+        for statement in (
+            "UPDATE sky_state.effect_budget_reservations SET reserved='{}'::jsonb",
+            "DELETE FROM sky_state.effect_budget_reservations",
+            "DELETE FROM sky_state.effect_budget_windows",
+        ):
+            with (
+                self.assertRaises(self.psycopg.errors.InsufficientPrivilege),
+                self.api() as connection,
+            ):
+                connection.execute(statement)
+        with (
+            self.assertRaises(self.psycopg.errors.InsufficientPrivilege),
+            self.api() as connection,
+        ):
+            policy.record_usage(
+                connection,
+                workspace=workspace,
+                effect_key="role-test",
+                actual=maximum,
+                evidence_digest="b" * 64,
+            )
+        with self.psycopg.connect(
+            **{**self.dsn, "user": "sky_build", "password": self.password}
+        ) as worker:
+            self.assertTrue(
+                policy.record_usage(
+                    worker,
+                    workspace=workspace,
+                    effect_key="role-test",
+                    actual=maximum,
+                    evidence_digest="b" * 64,
+                )
+            )
+            self.assertFalse(
+                policy.record_usage(
+                    worker,
+                    workspace=workspace,
+                    effect_key="role-test",
+                    actual=maximum,
+                    evidence_digest="b" * 64,
+                )
+            )
+        with (
+            self.assertRaises(self.psycopg.errors.InsufficientPrivilege),
+            self.psycopg.connect(
+                **{**self.dsn, "user": "sky_build", "password": self.password}
+            ) as worker,
+        ):
+            worker.execute(
+                "UPDATE sky_state.effect_budget_settlements SET actual='{}'::jsonb"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

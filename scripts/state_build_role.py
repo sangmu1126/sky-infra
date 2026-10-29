@@ -36,6 +36,9 @@ def provision(connection, password):
         "mutation_scopes",
         "operation_events",
         "outbox_events",
+        "effect_budget_windows",
+        "effect_budget_reservations",
+        "effect_budget_settlements",
     )
     grants = tuple((table, "SELECT") for table in read_tables) + (
         ("operations", "UPDATE (" + ", ".join(OPERATION_COLUMNS) + ")"),
@@ -46,6 +49,9 @@ def provision(connection, password):
             "INSERT",
         ),  # Recovery emits a fresh attempt, never publishes it.
         ("mutation_scopes", "DELETE"),
+        ("effect_budget_windows", "INSERT"),
+        ("effect_budget_reservations", "INSERT"),
+        ("effect_budget_settlements", "INSERT"),
     )
     return {
         **provision_role(

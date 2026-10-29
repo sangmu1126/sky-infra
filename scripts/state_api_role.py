@@ -12,6 +12,7 @@ LEDGERS = (
     "admission_schema_versions",
     "approval_schema_versions",
     "preview_schema_versions",
+    "effect_budget_settlements",
 )
 EDITABLE = (
     "metadata_records",
@@ -19,7 +20,14 @@ EDITABLE = (
     "deployment_approvals",
     "deployment_previews",
 )
-APPEND_ONLY = ("operations", "mutation_scopes", "operation_events", "outbox_events")
+APPEND_ONLY = (
+    "operations",
+    "mutation_scopes",
+    "operation_events",
+    "outbox_events",
+    "effect_budget_windows",
+    "effect_budget_reservations",
+)
 
 
 def provision(connection, password):
