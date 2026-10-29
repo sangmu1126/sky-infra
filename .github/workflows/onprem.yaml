@@ -21,8 +21,8 @@ jobs:
       run:
         working-directory: ansible/onprem-vm
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Install the validation tool
@@ -31,3 +31,6 @@ jobs:
         run: ansible-playbook -i inventory.example.ini site.yml --syntax-check
       - name: Resolve the task list without applying changes
         run: ansible-playbook -i inventory.example.ini site.yml --list-tasks
+      - name: Check security collector service syntax without activation
+        working-directory: ansible/security-collector
+        run: ansible-playbook -i localhost, site.yml --syntax-check
