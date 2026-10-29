@@ -287,6 +287,12 @@ resource "aws_iam_role" "worker" {
 # 0) 큐 소비와 태스크 보호
 data "aws_iam_policy_document" "worker_jobs" {
   statement {
+    sid       = "WorkerOwnedExecutionGrants"
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["${var.artifacts_bucket_arn}/execution-grants/*"]
+  }
+
+  statement {
     sid = "ConsumeJobs"
     actions = [
       "sqs:ReceiveMessage",

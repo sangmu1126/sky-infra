@@ -53,7 +53,8 @@ resource "aws_iam_role_policy" "build_worker" {
       {
         Sid    = "ProtectOwnClusterTask", Effect = "Allow"
         Action = ["ecs:UpdateTaskProtection"], Resource = "arn:aws:ecs:${var.region}:${var.aws_account_id}:task/${var.name_prefix}-outbox/*"
-      }
+      },
+      { Sid = "WorkerOwnedExecutionGrants", Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "${module.artifacts.bucket_arn}/execution-grants/*" }
     ]
   })
 }

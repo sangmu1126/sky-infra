@@ -140,8 +140,8 @@ variable "builder_oidc_subject" {
   type        = string
   default     = null
   validation {
-    condition     = !var.enable_builder_role || can(regex("^repo:sangmu1126@[0-9]+/sky-builder@[0-9]+:ref:refs/heads/main$", var.builder_oidc_subject))
-    error_message = "Verify the personal builder owner/repository numeric IDs and pin its exact immutable main-branch subject."
+    condition     = !var.enable_builder_role || can(regex("^repo:sangmu1126@[0-9]+/sky-builder@[0-9]+:ref:refs/heads/main:workflow_ref:sangmu1126/sky-builder/[.]github/workflows/build[.]yml@refs/heads/main:workflow_sha:[0-9a-f]{40}$", var.builder_oidc_subject))
+    error_message = "Pin the immutable personal repository, main branch, exact build.yml workflow and reviewed workflow commit SHA."
   }
 }
 
@@ -182,5 +182,21 @@ variable "build_worker_platform_sha" {
   validation {
     condition     = !var.enable_build_worker_preflight || can(regex("^[0-9a-f]{40}$", var.build_worker_platform_sha))
     error_message = "Pin the platform code used by the builder."
+  }
+}
+variable "builder_controller_role_arn" {
+  type    = string
+  default = null
+  validation {
+    condition     = var.builder_controller_role_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:role/sky-[a-z0-9-]+-controller$", var.builder_controller_role_arn))
+    error_message = "Register an exact isolated controller role."
+  }
+}
+variable "builder_signing_key_arn" {
+  type    = string
+  default = null
+  validation {
+    condition     = var.builder_signing_key_arn == null || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]{36}$", var.builder_signing_key_arn))
+    error_message = "Register an immutable KMS signing key ARN."
   }
 }

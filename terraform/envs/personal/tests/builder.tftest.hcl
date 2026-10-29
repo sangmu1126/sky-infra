@@ -42,7 +42,7 @@ run "builder_has_exact_trust_and_bounded_artifacts" {
   command = apply
   variables {
     enable_builder_role  = true
-    builder_oidc_subject = "repo:sangmu1126@12345/sky-builder@67890:ref:refs/heads/main"
+    builder_oidc_subject = "repo:sangmu1126@12345/sky-builder@67890:ref:refs/heads/main:workflow_ref:sangmu1126/sky-builder/.github/workflows/build.yml@refs/heads/main:workflow_sha:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   }
   assert {
     condition = jsondecode(aws_iam_role.builder[0].assume_role_policy).Statement[0].Condition.StringEquals == {
@@ -53,12 +53,12 @@ run "builder_has_exact_trust_and_bounded_artifacts" {
   }
   assert {
     condition = toset(flatten([for s in jsondecode(aws_iam_role_policy.builder[0].policy).Statement : s.Action])) == toset([
-      "ecr:GetAuthorizationToken", "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:BatchGetImage", "ecr:DescribeImages", "s3:GetObject", "s3:PutObject"
+      "ecr:GetAuthorizationToken", "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:BatchGetImage", "ecr:DescribeImages", "ecr:DescribeRepositories", "ecr:ListTagsForResource", "s3:GetObject", "s3:PutObject"
     ])
     error_message = "Builder must have no deployment, IAM, queue, database or Secret permissions."
   }
   assert {
-    condition     = jsondecode(aws_iam_role_policy.builder[0].policy).Statement[1].Resource == data.aws_ecr_repository.builder[0].arn && jsondecode(aws_iam_role_policy.builder[0].policy).Statement[2].Resource == "${module.artifacts.bucket_arn}/sources/personal/*" && jsondecode(aws_iam_role_policy.builder[0].policy).Statement[3].Resource == "${module.artifacts.bucket_arn}/builds/*" && jsondecode(aws_iam_role_policy.builder[0].policy).Statement[3].Condition.StringEquals["s3:x-amz-server-side-encryption"] == "AES256"
+    condition     = jsondecode(aws_iam_role_policy.builder[0].policy).Statement[1].Resource == data.aws_ecr_repository.builder[0].arn && toset(jsondecode(aws_iam_role_policy.builder[0].policy).Statement[2].Resource) == toset(["${module.artifacts.bucket_arn}/sources/personal/*", "${module.artifacts.bucket_arn}/execution-grants/*"]) && jsondecode(aws_iam_role_policy.builder[0].policy).Statement[0].Effect == "Deny" && jsondecode(aws_iam_role_policy.builder[0].policy).Statement[3].Resource == "${module.artifacts.bucket_arn}/builds/*" && jsondecode(aws_iam_role_policy.builder[0].policy).Statement[3].Condition.StringEquals["s3:x-amz-server-side-encryption"] == "AES256"
     error_message = "Image writes must use app ECR only, source reads the personal workspace and result writes encrypted build records."
   }
 }

@@ -42,7 +42,8 @@ data "aws_iam_policy_document" "platform_deploy" {
 # 사용자 코드를 빌드하므로 AWS 권한은 push와 소스 읽기·결과 쓰기로만 제한한다.
 data "aws_iam_policy_document" "app_builder" {
   statement {
-    sid       = "EcrAuth"
+    sid       = "NoRegistryLoginToken"
+    effect    = "Deny"
     actions   = ["ecr:GetAuthorizationToken"]
     resources = ["*"]
   }
@@ -55,15 +56,16 @@ data "aws_iam_policy_document" "app_builder" {
       "ecr:CompleteLayerUpload",
       "ecr:PutImage",
       "ecr:BatchGetImage",
-      "ecr:GetDownloadUrlForLayer", # 빌드 캐시
       "ecr:DescribeImages",
+      "ecr:DescribeRepositories",
+      "ecr:ListTagsForResource",
     ]
     resources = [local.managed_repository_arn]
   }
   statement {
     sid       = "ReadSources"
     actions   = ["s3:GetObject"]
-    resources = ["${var.artifacts_bucket_arn}/sources/*"]
+    resources = ["${var.artifacts_bucket_arn}/sources/*", "${var.artifacts_bucket_arn}/execution-grants/*"]
   }
   statement {
     sid       = "WriteBuildResults"

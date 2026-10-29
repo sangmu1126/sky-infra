@@ -41,18 +41,18 @@ resource "aws_iam_role_policy" "builder" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "EcrAuthentication", Effect = "Allow"
+        Sid    = "NoRegistryLoginToken", Effect = "Deny"
         Action = ["ecr:GetAuthorizationToken"], Resource = "*"
       },
       {
         Sid      = "PublishAppImages", Effect = "Allow"
-        Action   = ["ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:BatchGetImage", "ecr:DescribeImages"]
+        Action   = ["ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:BatchGetImage", "ecr:DescribeImages", "ecr:DescribeRepositories", "ecr:ListTagsForResource"]
         Resource = data.aws_ecr_repository.builder[0].arn
       },
       {
         Sid       = "ReadPersonalSources", Effect = "Allow"
         Action    = ["s3:GetObject"]
-        Resource  = "${module.artifacts.bucket_arn}/sources/personal/*"
+        Resource  = ["${module.artifacts.bucket_arn}/sources/personal/*", "${module.artifacts.bucket_arn}/execution-grants/*"]
         Condition = { StringEquals = { "s3:ResourceAccount" = var.aws_account_id } }
       },
       {
@@ -71,4 +71,22 @@ resource "aws_iam_role_policy" "builder" {
 output "builder_role_arn" {
   description = "Prepare/publish role only; does not establish GitHub App or worker readiness"
   value       = var.enable_builder_role ? aws_iam_role.builder[0].arn : null
+}
+
+# Outer workflow role can assume only this registered controller. The latter
+# requires a job session tag and cannot access S3, ECR, KMS or application roles.
+resource "aws_iam_role_policy" "builder_controller" {
+  count = var.enable_builder_role && var.builder_controller_role_arn != null ? 1 : 0
+  role  = aws_iam_role.builder[0].id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Effect = "Allow", Action = ["sts:AssumeRole", "sts:TagSession"], Resource = var.builder_controller_role_arn },
+    { Effect = "Allow", Action = ["s3:GetObject"], Resource = "${module.artifacts.bucket_arn}/trusted-build-materials/*" }
+  ] })
+}
+resource "aws_iam_role_policy" "builder_signing" {
+  count = var.enable_builder_role && var.builder_signing_key_arn != null ? 1 : 0
+  role  = aws_iam_role.builder[0].id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [{
+    Effect = "Allow", Action = ["kms:DescribeKey", "kms:GetPublicKey", "kms:Sign"], Resource = var.builder_signing_key_arn
+  }] })
 }
