@@ -1,0 +1,13 @@
+[Unit]
+Description=Collect registered Sky security observations every minute
+
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=60
+AccuracySec=1
+RandomizedDelaySec=5
+Persistent=false
+Unit=sky-security-collector.service
+
+[Install]
+WantedBy=timers.target

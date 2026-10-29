@@ -1,0 +1,29 @@
+[Unit]
+Description=Sky bounded read-only security observation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ sky_security_user }}
+Group={{ sky_security_user }}
+WorkingDirectory={{ sky_security_root }}
+Environment=PYTHONPATH={{ sky_security_root }}/src:{{ sky_security_root }}
+ExecStart={{ sky_security_root }}/venv/bin/python -m scripts.collect_security_signals --registration {{ sky_security_registration }} --private-key {{ sky_security_private_key }} --output-directory /var/lib/sky-security --cycles 1
+TimeoutStartSec=50
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/sky-security
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=32
+# Failed cycles remain failed. This service never clears holds or grants security clearance.

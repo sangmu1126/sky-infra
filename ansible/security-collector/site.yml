@@ -1,0 +1,76 @@
+---
+# Deploy only trusted, pinned platform code. No uploaded application code or
+# credentials belong in this playbook/inventory. Host must supply a workload role.
+- name: Install a periodic bounded read-only security collector
+  hosts: sky_security_collectors
+  become: true
+  vars:
+    sky_security_user: sky-security
+    sky_security_enabled: false
+    sky_security_root: /opt/sky-security
+  tasks:
+    - name: Require explicit private registration and immutable runtime location
+      ansible.builtin.assert:
+        that:
+          - sky_security_registration is defined
+          - sky_security_private_key is defined
+          - sky_security_root == '/opt/sky-security'
+          - sky_security_registration is match('^/etc/sky-security/[A-Za-z0-9_.-]+[.]json$')
+          - sky_security_private_key is match('^/etc/sky-security/[A-Za-z0-9_.-]+[.]pem$')
+    - name: Create a dedicated collector identity
+      ansible.builtin.user:
+        name: '{{ sky_security_user }}'
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+    - name: Create private review output
+      ansible.builtin.file:
+        path: /var/lib/sky-security
+        state: directory
+        owner: '{{ sky_security_user }}'
+        group: '{{ sky_security_user }}'
+        mode: '0700'
+    - name: Validate private registration prerequisites
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: "{{ item.endswith('/venv/bin/python') }}"
+      loop:
+        - '{{ sky_security_registration }}'
+        - '{{ sky_security_private_key }}'
+        - '{{ sky_security_root }}/venv/bin/python'
+        - '{{ sky_security_root }}/scripts/collect_security_signals.py'
+      register: sky_security_paths
+    - name: Refuse missing or linked credentials/runtime
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+          - not item.stat.islnk
+      loop: '{{ sky_security_paths.results }}'
+      loop_control:
+        label: '{{ item.item }}'
+    - name: Enforce private key and registration ownership
+      ansible.builtin.file:
+        path: '{{ item }}'
+        owner: '{{ sky_security_user }}'
+        group: '{{ sky_security_user }}'
+        mode: '0600'
+      loop:
+        - '{{ sky_security_registration }}'
+        - '{{ sky_security_private_key }}'
+    - name: Install hardened service and timer
+      ansible.builtin.template:
+        src: '{{ item }}.j2'
+        dest: '/etc/systemd/system/{{ item }}'
+        owner: root
+        group: root
+        mode: '0644'
+      loop:
+        - sky-security-collector.service
+        - sky-security-collector.timer
+    - name: Activate only explicitly registered collection
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        name: sky-security-collector.timer
+        enabled: '{{ sky_security_enabled | bool }}'
+        state: "{{ 'started' if sky_security_enabled | bool else 'stopped' }}"
