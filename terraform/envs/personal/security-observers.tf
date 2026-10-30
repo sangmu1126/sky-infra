@@ -201,14 +201,29 @@ resource "aws_cloudwatch_log_metric_filter" "security_observer_heartbeat" {
 resource "aws_cloudwatch_metric_alarm" "security_observer_stale" {
   for_each            = local.active_security_observers
   alarm_name          = "${var.name_prefix}-${each.key}-collector-stale"
-  alarm_description   = "No successful collection in three periods; observation unavailable, not a compromise assertion or automatic release. Expected after registration expiry."
-  namespace           = "Sky/Security"
-  metric_name         = "${var.name_prefix}-ObserverHeartbeat-${each.key}"
+  alarm_description   = "Three missing heartbeat periods out of five; observation unavailable, not a compromise assertion or automatic release. Expected after registration expiry."
   comparison_operator = "LessThanThreshold"
   threshold           = 1
-  evaluation_periods  = 3
+  evaluation_periods  = 5
   datapoints_to_alarm = 3
-  period              = 60
-  statistic           = "Sum"
   treat_missing_data  = "breaching"
+  # Explicit zeros avoid re-evaluating old healthy points when logs stop.
+  # M-of-N tolerates the newest delayed ingestion periods without declaring
+  # collection healthy merely because an older heartbeat still exists.
+  metric_query {
+    id          = "heartbeat"
+    return_data = false
+    metric {
+      namespace   = "Sky/Security"
+      metric_name = "${var.name_prefix}-ObserverHeartbeat-${each.key}"
+      period      = 60
+      stat        = "Sum"
+    }
+  }
+  metric_query {
+    id          = "available"
+    expression  = "FILL(heartbeat, 0)"
+    label       = "Successful collection heartbeat (missing = 0)"
+    return_data = true
+  }
 }

@@ -5,6 +5,7 @@ mock_provider "aws" {
   mock_data "aws_sqs_queue" { defaults = { arn = "arn:aws:sqs:ap-northeast-2:123456789012:sky-security-build-review", url = "https://sqs.ap-northeast-2.amazonaws.com/123456789012/sky-security-build-review" } }
 }
 variables {
+  trusted_controller_expiry         = null
   hosted_build_consumer             = null
   security_observers                = {}
   enable_security_acceptance_canary = false
@@ -71,7 +72,7 @@ run "registered_observer_is_read_only_and_has_independent_audit_writer" {
     build_worker_platform_sha     = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
     security_observer_image = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/sky-platform@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    security_observers      = { probe = { desired_count = 0, registration_json = jsonencode({ version = 1, expires_at = "2099-01-01T00:00:00Z", aws = { account_id = "123456789012", region = "ap-northeast-2", role_arn = "arn:aws:iam::123456789012:role/sky-probe", role_id = "AROAAAAAAAAAAAAAAAAAA", forbidden_secrets = ["arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:sky-probe-AbCdEf"] }, detector = { detector_id = "probe", organization_id = "personal", application_id = "probe", public_key = "synthetic mock public key", reasons = ["credential_exposure"] }, scope = { job_id = "aaaaaaaaaaaaaaaa", source_digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", record_revision = 1 }, audit = {} }) } }
+    security_observers      = { probe = { desired_count = 1, registration_json = jsonencode({ version = 1, expires_at = "2099-01-01T00:00:00Z", aws = { account_id = "123456789012", region = "ap-northeast-2", role_arn = "arn:aws:iam::123456789012:role/sky-probe", role_id = "AROAAAAAAAAAAAAAAAAAA", forbidden_secrets = ["arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:sky-probe-AbCdEf"] }, detector = { detector_id = "probe", organization_id = "personal", application_id = "probe", public_key = "synthetic mock public key", reasons = ["credential_exposure"] }, scope = { job_id = "aaaaaaaaaaaaaaaa", source_digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", record_revision = 1 }, audit = {} }) } }
   }
   assert {
     condition     = alltrue([for s in jsondecode(aws_iam_role_policy.security_observer["probe"].policy).Statement : s.Effect != "Allow" || length(setintersection(toset(s.Action), toset(["secretsmanager:GetSecretValue", "ecs:UpdateService", "iam:PassRole", "s3:PutObject"]))) == 0]) && length([for s in jsondecode(aws_iam_role_policy.security_observer["probe"].policy).Statement : s if s.Effect == "Deny" && contains(s.Action, "secretsmanager:GetSecretValue")]) == 1
@@ -89,4 +90,9 @@ run "registered_observer_is_read_only_and_has_independent_audit_writer" {
     condition     = jsondecode(aws_scheduler_schedule.security_runtime_stop["security-probe"].target[0].input).DesiredCount == 0 && aws_scheduler_schedule.security_runtime_stop["security-probe"].schedule_expression == "at(2099-01-01T00:00:00)"
     error_message = "Registration expiry must schedule a stop without extending its approval."
   }
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.security_observer_stale["probe"].evaluation_periods == 5 && aws_cloudwatch_metric_alarm.security_observer_stale["probe"].datapoints_to_alarm == 3 && length([for query in aws_cloudwatch_metric_alarm.security_observer_stale["probe"].metric_query : query if query.return_data && query.expression == "FILL(heartbeat, 0)"]) == 1
+    error_message = "Missing collection heartbeats must become zero with bounded ingestion-delay tolerance, rather than reusing old healthy points."
+  }
+
 }
