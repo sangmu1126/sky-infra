@@ -1,4 +1,5 @@
 mock_provider "aws" {
+  mock_resource "aws_iam_policy" { defaults = { arn = "arn:aws:iam::123456789012:policy/mock-boundary" } }
   mock_data "aws_caller_identity" { defaults = { account_id = "123456789012" } }
   mock_data "aws_cloudformation_stack" {
     defaults = { id = "arn:aws:cloudformation:ap-northeast-2:123456789012:stack/sky-core/synthetic", outputs = { ExecutionRoleArn = "arn:aws:iam::123456789012:role/sky-core-ExecutionRole-Synthetic", InfrastructureRoleArn = "arn:aws:iam::123456789012:role/sky-core-InfrastructureRole-Synthetic" } }
@@ -6,23 +7,31 @@ mock_provider "aws" {
   mock_resource "aws_iam_role" { defaults = { arn = "arn:aws:iam::123456789012:role/mock-runtime" } }
 }
 variables {
-  enable_shared_workload_pool   = false
-  aws_account_id                = "123456789012"
-  enable_public_api             = false
-  public_api_image              = null
-  api_memberships               = []
-  enable_api_role               = false
-  api_operator_principal_arn    = null
-  enable_ssm_bridge             = false
-  enable_outbox_service         = false
-  outbox_service_image          = null
-  enable_builder_role           = false
-  builder_oidc_subject          = null
-  enable_build_worker_role      = false
-  enable_build_worker_preflight = false
-  build_worker_image            = null
-  build_worker_builder_sha      = null
-  build_worker_platform_sha     = null
+  security_observers                = {}
+  security_observer_image           = null
+  enable_security_acceptance_canary = false
+  security_canary_read_enabled      = false
+  trusted_controller_expiry         = null
+  hosted_build_consumer             = null
+  security_effect_budget_json       = null
+  enable_scoped_deployments         = false
+  enable_shared_workload_pool       = false
+  aws_account_id                    = "123456789012"
+  enable_public_api                 = false
+  public_api_image                  = null
+  api_memberships                   = []
+  enable_api_role                   = false
+  api_operator_principal_arn        = null
+  enable_ssm_bridge                 = false
+  enable_outbox_service             = false
+  outbox_service_image              = null
+  enable_builder_role               = false
+  builder_oidc_subject              = null
+  enable_build_worker_role          = false
+  enable_build_worker_preflight     = false
+  build_worker_image                = null
+  build_worker_builder_sha          = null
+  build_worker_platform_sha         = null
 }
 
 run "consumer_and_secret_absent_without_opt_in" {
@@ -93,4 +102,39 @@ run "consumer_rejects_missing_budget" {
     security_effect_budget_json = null
   }
   expect_failures = [var.hosted_build_consumer]
+}
+
+run "scoped_worker_cannot_bypass_application_session" {
+  command = apply
+  variables {
+
+    enable_ssm_bridge             = true
+    ssm_bridge_ami_id             = "ami-0123456789abcdef0"
+    enable_outbox_service         = true
+    outbox_service_image          = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/sky-platform@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    enable_build_worker_role      = true
+    enable_build_worker_preflight = true
+    build_worker_image            = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/sky-platform@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    build_worker_builder_sha      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    build_worker_platform_sha     = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    builder_signing_key_arn       = "arn:aws:kms:ap-northeast-2:123456789012:key/00000000-0000-4000-8000-000000000001"
+    security_effect_budget_json   = jsonencode({ version = 2, expires_at = "2099-01-01T00:00:00Z", source = "synthetic mock policy", limits = {}, effects = {} })
+    hosted_build_consumer = {
+      app_id             = "12345", installation_id = "67890", desired_count = 0
+      signing_trust_json = jsonencode({ version = 1, key_arn = "arn:aws:kms:ap-northeast-2:123456789012:key/00000000-0000-4000-8000-000000000001", public_key_der_base64 = "synthetic-mock-key" })
+    }
+    enable_scoped_deployments = true
+  }
+  assert {
+    condition     = aws_iam_role.app_deployment[0].permissions_boundary == aws_iam_policy.app_deployment_boundary[0].arn && length([for p in jsondecode(aws_iam_role_policy.build_consumer_deployment[0].policy).Statement : p if p.Sid == "NoAmbientDeployment" && p.Effect == "Deny" && contains(p.Action, "iam:PassRole")]) == 1
+    error_message = "Hosted workers must have no ambient deployment bypass; broker boundary is mandatory."
+  }
+  assert {
+    condition     = contains([for e in jsondecode(aws_ecs_task_definition.build_consumer[0].container_definitions)[0].environment : e.name], "SKY_DEPLOYMENT_ROLE_JSON") && alltrue([for p in local.broker_deployment_permissions : !contains(try(p.Action, []), "iam:CreateRole") && !contains(try(p.Action, []), "secretsmanager:GetSecretValue")])
+    error_message = "Deployment credentials cannot create roles or fetch workload/controller secrets."
+  }
+  assert {
+    condition     = length([for p in local.broker_deployment_permissions : p if p.Sid == "CreateOwnedStatelessService" && p.Condition.StringEquals["aws:RequestTag/sky-application"] == "$${aws:PrincipalTag/sky:ApplicationId}"]) == 1
+    error_message = "Service ownership tags must match the authenticated application session."
+  }
 }

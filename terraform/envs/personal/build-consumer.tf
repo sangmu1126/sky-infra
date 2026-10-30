@@ -51,23 +51,13 @@ resource "aws_iam_role_policy" "build_consumer_execution" {
 resource "aws_iam_role_policy" "build_consumer_deployment" {
   count = local.build_consumer_enabled ? 1 : 0
   role  = aws_iam_role.build_worker[0].id
-  policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Sid = "ObserveRegisteredSigningKey", Effect = "Allow", Action = ["kms:DescribeKey", "kms:GetPublicKey"], Resource = var.builder_signing_key_arn },
-    { Sid = "ReadOwnedCore", Effect = "Allow", Action = ["cloudformation:DescribeStacks"], Resource = data.aws_cloudformation_stack.build_consumer_core[0].id },
-    { Sid = "CreateOwnedStatelessService", Effect = "Allow", Action = ["ecs:CreateExpressGatewayService"], Resource = "arn:aws:ecs:${var.region}:${var.aws_account_id}:service/default/sky-b-*",
-    Condition = { StringEquals = { "aws:RequestTag/sky-managed" = "true", "aws:RequestTag/sky-organization" = "personal", "aws:RequestTag/sky-workspace" = "personal" }, Null = { "aws:RequestTag/sky-operation" = "false", "aws:RequestTag/sky-application" = "false", "aws:RequestTag/sky-attempt" = "false" } } },
-    { Sid = "TagOnlyOnCreation", Effect = "Allow", Action = ["ecs:TagResource"], Resource = "arn:aws:ecs:${var.region}:${var.aws_account_id}:service/default/sky-b-*",
-    Condition = { StringEquals = { "ecs:CreateAction" = "CreateExpressGatewayService", "aws:RequestTag/sky-managed" = "true", "aws:RequestTag/sky-organization" = "personal", "aws:RequestTag/sky-workspace" = "personal" } } },
-    { Sid = "ObserveApprovedServices", Effect = "Allow", Action = ["ecs:DescribeExpressGatewayService", "ecs:ListTagsForResource"], Resource = "arn:aws:ecs:${var.region}:${var.aws_account_id}:service/default/sky-b-*" },
-    { Sid = "ObserveExactDeploymentFamilies", Effect = "Allow", Action = ["ecs:DescribeServiceDeployments"], Resource = ["arn:aws:ecs:${var.region}:${var.aws_account_id}:service-deployment/default/sky-b-*/*", "arn:aws:ecs:${var.region}:${var.aws_account_id}:service/default/sky-b-*"] },
-    { Sid = "ObserveTaskDefinitions", Effect = "Allow", Action = ["ecs:DescribeTaskDefinition"], Resource = "*" },
-    # AWS requires these dependent actions; scope writes to generated app families.
-    { Sid = "DefaultClusterOnly", Effect = "Allow", Action = ["ecs:CreateCluster"], Resource = "arn:aws:ecs:${var.region}:${var.aws_account_id}:cluster/default" },
-    { Sid = "RegisterOnlyAppTaskFamilies", Effect = "Allow", Action = ["ecs:RegisterTaskDefinition"], Resource = "arn:aws:ecs:${var.region}:${var.aws_account_id}:task-definition/default-sky-b-*:*", Condition = { BoolIfExists = { "ecs:privileged" = "false" } } },
-    { Sid = "TagTaskOnlyOnRegistration", Effect = "Allow", Action = ["ecs:TagResource"], Resource = "arn:aws:ecs:${var.region}:${var.aws_account_id}:task-definition/default-sky-b-*:*", Condition = { StringEquals = { "ecs:CreateAction" = "RegisterTaskDefinition" } } },
-    { Sid = "PassCoreExecutionRoleToTasks", Effect = "Allow", Action = ["iam:PassRole"], Resource = data.aws_cloudformation_stack.build_consumer_core[0].outputs.ExecutionRoleArn, Condition = { StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" } } },
-    { Sid = "PassOnlyCoreRolesToExpress", Effect = "Allow", Action = ["iam:PassRole"], Resource = [data.aws_cloudformation_stack.build_consumer_core[0].outputs.ExecutionRoleArn, data.aws_cloudformation_stack.build_consumer_core[0].outputs.InfrastructureRoleArn], Condition = { StringEquals = { "iam:PassedToService" = "ecs.amazonaws.com" } } }
-  ] })
+  policy = jsonencode({ Version = "2012-10-17", Statement = concat([
+    { Sid = "ObserveRegisteredSigningKey", Effect = "Allow", Action = ["kms:DescribeKey", "kms:GetPublicKey"], Resource = var.builder_signing_key_arn }
+    ], jsondecode(var.enable_scoped_deployments ? jsonencode([
+      { Sid = "AssumeOnlyOwnedDeploymentBroker", Effect = "Allow", Action = ["sts:AssumeRole", "sts:TagSession"], Resource = aws_iam_role.app_deployment[0].arn },
+      { Sid = "PinDeploymentBrokerIdentity", Effect = "Allow", Action = ["iam:GetRole"], Resource = aws_iam_role.app_deployment[0].arn },
+      { Sid = "NoAmbientDeployment", Effect = "Deny", Action = ["ecs:CreateExpressGatewayService", "ecs:DeleteExpressGatewayService", "ecs:RegisterTaskDefinition", "ecs:CreateCluster", "iam:PassRole"], Resource = "*" }
+  ]) : jsonencode(local.legacy_consumer_deployment_permissions))) })
   lifecycle {
     precondition {
       condition     = can(regex("^arn:aws:iam::${var.aws_account_id}:role/sky-core-ExecutionRole-[A-Za-z0-9]+$", data.aws_cloudformation_stack.build_consumer_core[0].outputs.ExecutionRoleArn)) && can(regex("^arn:aws:iam::${var.aws_account_id}:role/sky-core-InfrastructureRole-[A-Za-z0-9]+$", data.aws_cloudformation_stack.build_consumer_core[0].outputs.InfrastructureRoleArn))
@@ -98,7 +88,7 @@ resource "aws_ecs_task_definition" "build_consumer" {
       SKY_GITHUB_APP_ID          = var.hosted_build_consumer.app_id, SKY_GITHUB_INSTALLATION_ID = var.hosted_build_consumer.installation_id
       SKY_REQUIRE_SIGNED_BUILDS  = "true", SKY_BUILD_SIGNING_TRUST_JSON = var.hosted_build_consumer.signing_trust_json
       SKY_REQUIRE_EFFECT_BUDGETS = "true"
-    }) : { name = name, value = value }]
+    }, var.enable_scoped_deployments ? { SKY_DEPLOYMENT_ROLE_JSON = jsonencode(local.deployment_role_registration) } : {}) : { name = name, value = value }]
     secrets          = [{ name = "SKY_GITHUB_APP_PRIVATE_KEY", valueFrom = aws_secretsmanager_secret.github_app[0].arn }]
     mountPoints      = [], portMappings = [], systemControls = [], volumesFrom = []
     linuxParameters  = { capabilities = { add = [], drop = ["ALL"] } }
