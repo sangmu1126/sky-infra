@@ -1,6 +1,6 @@
 locals {
   api_origin = var.enable_public_api ? "https://${aws_cloudfront_distribution.api[0].domain_name}" : null
-  public_api_environment = var.enable_public_api ? merge(local.state_environment, {
+  public_api_environment = var.enable_public_api ? merge(local.state_environment, local.security_runtime_environment, {
     SKY_DATABASE_SECRET_ARN         = aws_secretsmanager_secret.state_api.arn
     SKY_DEPLOYMENT_CONSUMER_ENABLED = "false"
     TMPDIR                          = "/scratch/work"

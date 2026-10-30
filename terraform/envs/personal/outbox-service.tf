@@ -133,7 +133,7 @@ resource "aws_ecs_task_definition" "outbox" {
     name    = "outbox", image = var.outbox_service_image, essential = true
     user    = "65534:65534", readonlyRootFilesystem = true
     command = ["worker", "--mode", "outbox", "--interval", "15"]
-    environment = [for name, value in merge(local.state_environment, {
+    environment = [for name, value in merge(local.state_environment, local.security_runtime_environment, {
       SKY_DATABASE_SECRET_ARN = aws_secretsmanager_secret.state_outbox.arn
     }) : { name = name, value = value }]
     # Match the ECS API's explicit empty defaults to avoid perpetual task revisions.

@@ -86,7 +86,7 @@ resource "aws_ecs_task_definition" "build_worker_preflight" {
     user       = "65534:65534", readonlyRootFilesystem = true
     entryPoint = ["python", "-c"]
     command    = [file("${path.module}/../../../scripts/build_worker_preflight.py")]
-    environment = [for name, value in merge(local.state_environment, {
+    environment = [for name, value in merge(local.state_environment, local.security_runtime_environment, {
       SKY_DATABASE_SECRET_ARN            = aws_secretsmanager_secret.state_build[0].arn
       SKY_PREFLIGHT_FORBIDDEN_SECRET_ARN = aws_secretsmanager_secret.state_api.arn
       SKY_BUILDER_REPOSITORY             = "sangmu1126/sky-builder"
