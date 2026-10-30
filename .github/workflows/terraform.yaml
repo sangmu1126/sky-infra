@@ -81,6 +81,10 @@ jobs:
         run: terraform -chdir=terraform/envs/personal test
       - name: Security controller boundaries with mock provider
         run: terraform -chdir=terraform/envs/security-sandbox test
+      - name: Application delegation boundaries with mock provider
+        run: |
+          terraform -chdir=terraform/modules/app-delegation init -backend=false -input=false
+          terraform -chdir=terraform/modules/app-delegation test
 
   plan:
     # 역할이 만들어지고 저장소 변수가 설정된 뒤부터 동작한다.
