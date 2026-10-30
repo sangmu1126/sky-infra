@@ -79,6 +79,8 @@ jobs:
         run: terraform -chdir=terraform/envs/dev test
       - name: Personal foundation with mock provider
         run: terraform -chdir=terraform/envs/personal test
+      - name: Security controller boundaries with mock provider
+        run: terraform -chdir=terraform/envs/security-sandbox test
 
   plan:
     # 역할이 만들어지고 저장소 변수가 설정된 뒤부터 동작한다.
