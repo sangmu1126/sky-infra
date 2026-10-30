@@ -2,7 +2,7 @@ locals {
   api_origin = var.enable_public_api ? "https://${aws_cloudfront_distribution.api[0].domain_name}" : null
   public_api_environment = var.enable_public_api ? merge(local.state_environment, local.security_runtime_environment, {
     SKY_DATABASE_SECRET_ARN         = aws_secretsmanager_secret.state_api.arn
-    SKY_DEPLOYMENT_CONSUMER_ENABLED = "false"
+    SKY_DEPLOYMENT_CONSUMER_ENABLED = tostring(try(var.hosted_build_consumer.desired_count == 1, false))
     TMPDIR                          = "/scratch/work"
     SKY_COGNITO_LOGIN_DOMAIN        = "https://${aws_cognito_user_pool_domain.api[0].domain}.auth.${var.region}.amazoncognito.com"
     SKY_COGNITO_AUTH_JSON = jsonencode({
