@@ -13,6 +13,12 @@ variable "security_effect_budget_json" {
     )
     error_message = "Supply an exact version-2 operator policy with explicit expiry, source, limits and effects; never a secret."
   }
+  validation {
+    condition = var.security_effect_budget_json == null || !var.enable_public_api || try(
+      contains(keys(jsondecode(var.security_effect_budget_json).effects), "source_preparation"), false
+    )
+    error_message = "A hosted preparation API needs an explicit source_preparation reservation; a build-only policy would reject every upload."
+  }
 }
 
 locals {

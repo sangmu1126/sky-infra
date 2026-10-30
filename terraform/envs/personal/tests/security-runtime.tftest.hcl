@@ -51,3 +51,22 @@ run "reject_credentials_or_unbounded_policy_fields" {
   }
   expect_failures = [var.security_effect_budget_json]
 }
+
+run "hosted_upload_rejects_build_only_budget" {
+  command = plan
+  variables {
+    enable_public_api     = true
+    enable_api_role       = true
+    enable_ssm_bridge     = true
+    ssm_bridge_ami_id     = "ami-0123456789abcdef0"
+    enable_outbox_service = true
+    outbox_service_image  = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/sky-platform@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    public_api_image      = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/sky-platform@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    security_effect_budget_json = jsonencode({
+      version = 2, expires_at = "2099-01-01T00:00:00Z", source = "synthetic test, not a price"
+      limits  = { for scope in ["global", "organization", "user", "application"] : scope => { requests = 1 } }
+      effects = { github_build = { requests = 1 } }
+    })
+  }
+  expect_failures = [var.security_effect_budget_json]
+}
